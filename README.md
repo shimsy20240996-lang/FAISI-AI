@@ -105,7 +105,8 @@ NOVA AI has completed all core capabilities across Phases 0 through 10.7 and is 
 | **Backend Runtime** | [Node.js](https://nodejs.org/) (v24.15.0 compatible) + [Express](https://expressjs.com/) |
 | **Database & ODM** | [MongoDB](https://www.mongodb.com/) + [Mongoose 8](https://mongoosejs.com/) |
 | **File Upload & Storage** | `multer` (v2.0.2) + Local Storage Provider Abstraction |
-| **Document Parsers** | `pdf-parse` (v2.4.5) + `mammoth` (v1.12.2) + `adm-zip` (v0.5.16) + Pure JS RFC 4180 CSV |
+| **Document Parsers** | `pdf-parse` (v2.4.5) + `mammoth` (v1.12.2) + `adm-zip` (v0.6.0) + Pure JS RFC 4180 CSV |
+| **Image Sanitization** | `sharp` (v0.35.4) Rasterization & Metadata Stripping |
 | **Authentication & Crypto** | `bcryptjs` (Password Hashing) + `jsonwebtoken` + `cookie-parser` + `crypto` (SHA-256) |
 | **Security & Hardening** | `helmet` + `express-rate-limit` + CSRF Origin Validation |
 | **Streaming Protocol** | Server-Sent Events (`text/event-stream`) |
