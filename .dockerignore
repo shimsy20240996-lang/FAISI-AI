@@ -1,0 +1,29 @@
+# Version control
+.git
+.gitignore
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules
+npm-debug.log
+
+# Build artifacts
+dist
+dist-ssr
+coverage
+
+# Local Storage
+storage/
+
+# Editor & IDE
+.vscode
+.idea
+.DS_Store
+
+# Test fixtures and scratch
+test_fixtures
+scratch/

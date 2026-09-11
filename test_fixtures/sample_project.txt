@@ -1,0 +1,4 @@
+NOVA AI Project Overview
+
+Phase 6: Secure Multi-Format Document Analysis Foundation.
+Features: PDF, DOCX, CSV, TXT support with prompt injection defenses.
