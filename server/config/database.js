@@ -1,7 +1,21 @@
+import dns from 'node:dns';
 import mongoose from 'mongoose';
 import { ENV } from './env.js';
 import { logger } from '../utils/logger.js';
 import { recordDatabaseConnected, recordDatabaseError } from '../utils/metrics.js';
+
+// Configure reliable DNS servers for Node.js c-ares resolver to ensure MongoDB Atlas
+// SRV record resolution (_mongodb._tcp) succeeds on Windows and environments where local DNS returns ECONNREFUSED.
+try {
+  const customDns = process.env.DNS_SERVERS
+    ? process.env.DNS_SERVERS.split(',').map((s) => s.trim()).filter(Boolean)
+    : ['8.8.8.8', '8.8.4.4'];
+  if (customDns.length > 0) {
+    dns.setServers(customDns);
+  }
+} catch (dnsErr) {
+  logger.warn('database.dns_set_servers_warning', { error: dnsErr?.message || dnsErr });
+}
 
 let isConnecting = false;
 
