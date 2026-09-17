@@ -15,7 +15,7 @@ import { useAuth } from '../../context/AuthContext';
 import Button from '../common/Button';
 
 /**
- * Accessible, original NOVA AI Authentication Modal (Login & Registration).
+ * Accessible, original SABU AI Authentication Modal (Login & Registration).
  * @param {{
  *   isOpen: boolean,
  *   onClose: () => void,
@@ -204,7 +204,7 @@ export function AuthModal({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Modal Header with NOVA Gradient */}
+        {/* Modal Header with SABU Gradient */}
         <div className="p-6 pb-4 text-center border-b border-neutral-800/80 dark:border-neutral-800/80 light:border-neutral-200">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 p-0.5 mx-auto mb-3 shadow-lg shadow-indigo-500/25 flex items-center justify-center">
             <div className="w-full h-full bg-neutral-950 dark:bg-neutral-950 light:bg-white rounded-[14px] flex items-center justify-center">
@@ -215,7 +215,7 @@ export function AuthModal({
             id="auth-modal-title"
             className="text-xl font-extrabold tracking-tight text-neutral-100 dark:text-neutral-100 light:text-neutral-900"
           >
-            {mode === 'login' ? 'Welcome Back to NOVA AI' : 'Create Your NOVA AI Account'}
+            {mode === 'login' ? 'Welcome Back to SABU AI' : 'Create Your SABU AI Account'}
           </h2>
           <p className="text-xs text-neutral-400 dark:text-neutral-400 light:text-neutral-600 mt-1 max-w-xs mx-auto">
             {mode === 'login'
@@ -394,7 +394,7 @@ export function AuthModal({
               isLoading={isSubmitting}
               rightIcon={<ArrowRight className="w-4 h-4" />}
             >
-              {mode === 'login' ? 'Sign In to NOVA AI' : 'Create Account'}
+              {mode === 'login' ? 'Sign In to SABU AI' : 'Create Account'}
             </Button>
           </div>
         </form>

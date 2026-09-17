@@ -61,7 +61,9 @@ export async function executeWithTransientRetry(
 class GeminiService {
   constructor() {
     this.client = null;
-    this.modelName = ENV.GEMINI_MODEL || 'gemini-2.5-flash';
+    const configuredModel = ENV.GEMINI_MODEL || 'gemini-3.6-flash';
+    // If configured with legacy discontinued gemini-2.5-flash, upgrade to active gemini-3.6-flash
+    this.modelName = configuredModel === 'gemini-2.5-flash' ? 'gemini-3.6-flash' : configuredModel;
   }
 
   /**

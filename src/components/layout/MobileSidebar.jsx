@@ -92,7 +92,7 @@ export function MobileSidebar({
                   </div>
                 </div>
                 <span className="font-extrabold text-base tracking-tight text-neutral-100 dark:text-neutral-100 light:text-neutral-900">
-                  NOVA AI
+                  SABU AI
                 </span>
               </div>
               <IconButton

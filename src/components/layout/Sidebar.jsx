@@ -123,7 +123,7 @@ export function Sidebar({
           </div>
           {!isCollapsed && (
             <span className="font-extrabold text-base tracking-tight bg-gradient-to-r from-neutral-100 to-neutral-400 dark:from-neutral-100 dark:to-neutral-400 light:from-neutral-900 light:to-neutral-700 bg-clip-text text-transparent">
-              NOVA AI
+              SABU AI
             </span>
           )}
         </div>

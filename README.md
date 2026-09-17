@@ -1,6 +1,8 @@
-# NOVA AI
+# SABU AI
 
-NOVA AI is a modern, premium, production-oriented AI workspace and assistant platform powered by Google Gemini and built with a secure full-stack architecture, persistent MongoDB database storage, robust user authentication with HTTP-only cookie sessions, and a secure multi-format document analysis pipeline.
+**Your AI. Your Way.**
+
+SABU AI is a modern, accessible AI assistant and workspace platform powered by Google Gemini and built with a secure full-stack architecture, persistent MongoDB database storage, robust user authentication with HTTP-only cookie sessions, and a secure multi-format document analysis pipeline.
 
 ---
 
@@ -8,7 +10,7 @@ NOVA AI is a modern, premium, production-oriented AI workspace and assistant pla
 
 ```text
 ┌────────────────────────────────────────────────────────┐
-│             NOVA AI Frontend (React 19 + Vite)          │
+│             SABU AI Frontend (React 19 + Vite)          │
 │   - React AuthContext (Session & State Management)     │
 │   - Document Workspace & AI Analysis Hub Modal         │
 │   - Accessible FileUploadZone (Drag-and-Drop)          │
@@ -23,7 +25,7 @@ NOVA AI is a modern, premium, production-oriented AI workspace and assistant pla
                             │  (/api/auth/*, /api/conversations/*, /api/documents/*, /api/chat/stream)
                             ▼
 ┌────────────────────────────────────────────────────────┐
-│             NOVA AI Backend (Node.js + Express)        │
+│             SABU AI Backend (Node.js + Express)        │
 │   - Multer In-Memory Single-File Stream Handler (10MB) │
 │   - Multi-Layer File Validator (Magic Bytes / OpenXML) │
 │   - Storage Service Abstraction (localStorageProvider) │
@@ -40,7 +42,7 @@ NOVA AI is a modern, premium, production-oriented AI workspace and assistant pla
 ┌──────────────────────────┐  ┌──────────────────────────┐
 │  Document & Chat Service │  │  AI Service Abstraction   │
 │  - User-Scoped Quotas    │  │  - @google/genai SDK      │
-│  - Concurrency Throttling│  │  - gemini-2.5-flash       │
+│  - Concurrency Throttling│  │  - gemini-3.6-flash       │
 │  - User Duplicate Check  │  │  - Prompt Injection Armor │
 │  - IDOR Protection       │  │  - <DOCUMENT_CONTENT>     │
 │  - Atomic Rollback Guard │  │  - Streaming Generation   │
@@ -57,9 +59,9 @@ NOVA AI is a modern, premium, production-oriented AI workspace and assistant pla
 └──────────────────────────┘
 ```
 
-## 🚀 Release Stage: NOVA AI v0.8.1 (Production Release Candidate)
+## 🚀 Release Stage: SABU AI v0.8.1 (Production Release Candidate)
 
-NOVA AI has completed all core capabilities across Phases 0 through 10.7 and is in **Phase 10.8 — Release Preparation**. The system provides an end-to-end, multi-tenant AI workspace and production runtime:
+SABU AI has completed all core capabilities across Phases 0 through 10.7 and is in **Phase 10.8 — Release Preparation**. The system provides an end-to-end, multi-tenant AI workspace and production runtime:
 
 - **Supported Document Formats**: Native support for `PDF`, `DOCX`, `CSV`, and `TXT` files.
 - **Multi-Layer Structural File Validation**:
@@ -111,7 +113,7 @@ NOVA AI has completed all core capabilities across Phases 0 through 10.7 and is 
 | **Security & Hardening** | `helmet` + `express-rate-limit` + CSRF Origin Validation |
 | **Streaming Protocol** | Server-Sent Events (`text/event-stream`) |
 | **AI SDK** | [Google GenAI SDK (`@google/genai`)](https://www.npmjs.com/package/@google/genai) |
-| **Default AI Model** | `gemini-2.5-flash` |
+| **Default AI Model** | `gemini-3.6-flash` |
 | **Environment Management** | `dotenv` + `cors` |
 
 ---
@@ -162,7 +164,7 @@ nova-ai/
 │   │   └── ai/
 │   │       ├── aiService.js         # Provider abstraction interface (chat & analyzeDocument)
 │   │       ├── geminiService.js     # Concrete @google/genai implementation with timeout protection
-│   │       └── systemPrompt.js      # Central NOVA AI instruction + Document Analysis prompt armor
+│   │       └── systemPrompt.js      # Central SABU AI instruction + Document Analysis prompt armor
 │   ├── test/
 │   │   ├── phase4.test.js           # Phase 4 schema test suite
 │   │   ├── phase5.test.js           # Phase 5 authentication & IDOR test suite
@@ -240,7 +242,7 @@ MONGODB_DB_NAME=nova_ai
 
 # Google Gemini API Key (Required for live AI inference)
 GEMINI_API_KEY=your_actual_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 
 # Upstream Request & Streaming Timeouts (milliseconds)
 REQUEST_TIMEOUT_MS=30000
@@ -313,7 +315,7 @@ node --test "server/test/*.test.js"
 * `GET /api/documents/stats` — Returns storage usage and document count quotas.
 * `GET /api/documents/:id` — Retrieves single document metadata (IDOR protected).
 * `GET /api/documents/:id/content` — Retrieves bounded extracted text or structured CSV preview (IDOR protected).
-* `POST /api/documents/:id/analyze` — Analyzes document text with Gemini 2.5 Flash using prompt-injection defenses.
+* `POST /api/documents/:id/analyze` — Analyzes document text with Gemini 3.6 Flash using prompt-injection defenses.
 * `DELETE /api/documents/:id` — Physically deletes file from storage and removes MongoDB record.
 
 ### Conversation Endpoints (`/api/conversations`)
@@ -336,7 +338,7 @@ node --test "server/test/*.test.js"
 
 ## ⚙️ Production Environment & Configuration (Phase 10.1)
 
-NOVA AI utilizes a strict, environment-aware configuration engine with built-in validation to prevent insecure defaults from reaching production.
+SABU AI utilizes a strict, environment-aware configuration engine with built-in validation to prevent insecure defaults from reaching production.
 
 ### Environment Matrix
 
@@ -350,7 +352,7 @@ NOVA AI utilizes a strict, environment-aware configuration engine with built-in 
 | `AUTH_EXPIRES_IN` | `7d` | `7d` | `7d` | Expiration duration for signed JWT session tokens. |
 | `MONGODB_URI` | `mongodb://localhost:27017` | `mongodb://localhost:27017` | `mongodb+srv://...` | MongoDB connection URI (`mongodb://` or `mongodb+srv://`). |
 | `GEMINI_API_KEY` | Optional / Warns | Optional / Mock | Required | Google Gemini API key (server-side only, never leaked). |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | `gemini-2.5-flash` | `gemini-2.5-flash` | Primary reasoning and conversation model. |
+| `GEMINI_MODEL` | `gemini-3.6-flash` | `gemini-3.6-flash` | `gemini-3.6-flash` | Primary reasoning and conversation model. |
 | `VECTOR_STORE_TYPE` | `local_memory` or `mongodb_atlas`| `local_memory` | `mongodb_atlas` | RAG vector store (production prevents silent local fallback). |
 | `MAX_CONCURRENT_UPLOADS` | `10` | `10` | `10` | Global in-memory multipart upload concurrency cap. |
 | `MAX_CONCURRENT_UPLOADS_PER_USER` | `2` | `2` | `2` | Per-user concurrent upload limiter. |
@@ -379,7 +381,7 @@ NOVA AI utilizes a strict, environment-aware configuration engine with built-in 
 
 ### 1. Conceptual Production Architecture
 
-NOVA AI supports two production deployment topologies:
+SABU AI supports two production deployment topologies:
 
 #### Option A: Unified Same-Origin Architecture (Recommended)
 ```text
@@ -468,7 +470,7 @@ User Browser ──── HTTPS ────► Frontend Host / CDN (e.g. https:
 | `MONGODB_URI` | MongoDB Atlas connection string | `mongodb+srv://user:pass@cluster.mongodb.net/nova_ai` |
 | `MONGODB_DB_NAME` | Database name | `nova_ai` |
 | `GEMINI_API_KEY` | Google Gemini API key from AI Studio | `AIzaSy...` |
-| `GEMINI_MODEL` | Primary conversation model | `gemini-2.5-flash` |
+| `GEMINI_MODEL` | Primary conversation model | `gemini-3.6-flash` |
 | `VECTOR_STORE_TYPE` | RAG vector search engine | `mongodb_atlas` |
 | `EMBEDDING_MODEL` | Gemini embedding model | `gemini-embedding-2` |
 | `EMBEDDING_DIMENSIONS` | Vector embedding dimensions | `768` |
@@ -496,7 +498,6 @@ User Browser ──── HTTPS ────► Frontend Host / CDN (e.g. https:
 ---
 
 ### 8. Liveness & Readiness Probes (Phase 10.3)
-
 * **Liveness Probe**: `GET /api/health`
   * Reports if Node process is alive.
   * Returns `200 OK` with `{ status: 'ok', version: '0.8.1', environment, database, uptime, timestamp }`.
@@ -541,13 +542,13 @@ User Browser ──── HTTPS ────► Frontend Host / CDN (e.g. https:
 
 ### 12. Storage Persistence Limitation (Ephemeral vs Persistent Volumes)
 > [!WARNING]
-> NOVA AI stores processed documents on the local filesystem (`storage/documents/`). On cloud platforms with ephemeral containers (e.g. basic dynos, serverless), filesystem writes are wiped on restart/redeploy. For production durability, deploy with a **Persistent Volume / Mounted Disk** or host on a persistent VM instance until cloud object storage (S3/GCS) is implemented in a future phase.
+> SABU AI stores processed documents on the local filesystem (`storage/documents/`). On cloud platforms with ephemeral containers (e.g. basic dynos, serverless), filesystem writes are wiped on restart/redeploy. For production durability, deploy with a **Persistent Volume / Mounted Disk** or host on a persistent VM instance until cloud object storage (S3/GCS) is implemented in a future phase.
 
 ---
 
 ### 13. Single-Instance Architecture & Scaling Requirements
 > [!NOTE]
-> NOVA AI currently uses process-local in-memory state for:
+> SABU AI currently uses process-local in-memory state for:
 > 1. `UploadConcurrencyManager` (RAM concurrency guard)
 > 2. `StreamConcurrencyManager` (SSE stream bounds)
 > 3. `TTSCache` (In-memory audio synthesis cache)
@@ -590,7 +591,7 @@ docker run -d \
 
 ### 15. Operational Observability & Telemetry (Phase 10.6)
 
-NOVA AI includes a bounded, deterministic, in-memory operational telemetry engine providing real-time visibility into HTTP traffic, AI operations, SSE streams, database status, document pipelines, RAG searches, media processing, and rate limiting.
+SABU AI includes a bounded, deterministic, in-memory operational telemetry engine providing real-time visibility into HTTP traffic, AI operations, SSE streams, database status, document pipelines, RAG searches, media processing, and rate limiting.
 
 #### Metrics Endpoint
 ```http
@@ -670,7 +671,7 @@ Metric labels are strictly restricted to bounded whitelists. The metrics endpoin
       },
       {
         "name": "nova_ai_requests_total",
-        "labels": { "operation": "chat", "model": "gemini-2.5-flash", "statusClass": "2xx" },
+        "labels": { "operation": "chat", "model": "gemini-3.6-flash", "statusClass": "2xx" },
         "value": 12
       }
     ],
@@ -707,7 +708,7 @@ Metric labels are strictly restricted to bounded whitelists. The metrics endpoin
 
 - **Phase 0: Project Foundation** — Clean architecture, Tailwind v4, build pipeline. *(Completed)*
 - **Phase 1: Premium Frontend Interface** — Responsive UI, accessible chat components, dark/light themes. *(Completed)*
-- **Phase 2: Real AI Integration** — Node.js backend, `@google/genai` SDK, `gemini-2.5-flash`, multi-turn context. *(Completed)*
+- **Phase 2: Real AI Integration** — Node.js backend, `@google/genai` SDK, `gemini-3.6-flash`, multi-turn context. *(Completed)*
 - **Phase 3: Streaming + Conversation Engine** — Progressive SSE streaming, Stop generation, In-place regenerate, Auto-scroll, Content search. *(Completed)*
 - **Phase 4: MongoDB + Persistent Conversations** — MongoDB persistence, Mongoose models, anonymous isolation, idempotent migration, rename/delete modals. *(Completed)*
 - **Phase 5: User Authentication & Cloud Sync** — User accounts, bcrypt hashing, HTTP-only cookie sessions, IDOR protection, cloud synchronization. *(Completed)*
@@ -723,4 +724,4 @@ Metric labels are strictly restricted to bounded whitelists. The metrics endpoin
 - **Phase 10.6: Observability & Monitoring** — Request correlation (AsyncLocalStorage), structured JSON logging, in-memory telemetry, read-only `/api/metrics` endpoint. *(Completed)*
 - **Phase 10.7: Final Production QA** — End-to-end regression validation, security audit, browser smoke testing, production readiness scorecard. *(Completed)*
 - **Phase 10.8: Release Preparation** — Lockfile synchronization, release documentation, zero-secret validation, release checklist, and release candidate finalization. *(Completed)*
->>>>>>> 0404eed (feat: initial release candidate for NOVA AI v0.8.1)
+

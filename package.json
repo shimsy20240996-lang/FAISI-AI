@@ -1,5 +1,5 @@
 {
-  "name": "nova-ai",
+  "name": "sabu-ai",
   "private": true,
   "version": "0.8.1",
   "type": "module",
@@ -33,11 +33,11 @@
     "sharp": "^0.35.4"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.0.6",
+    "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
-    "tailwindcss": "^4.0.6",
-    "vite": "^6.1.0"
+    "tailwindcss": "^4.3.3",
+    "vite": "^6.4.3"
   },
   "overrides": {
     "qs": "^6.16.0"

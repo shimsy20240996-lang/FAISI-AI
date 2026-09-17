@@ -374,7 +374,9 @@ function App() {
       timestamp,
     };
 
-    const currentMessages = activeConversation?.messages || [];
+    const currentMessages = (activeConversation?.messages || []).filter(
+      (m) => !(m.role === 'assistant' && (!m.content || !m.content.trim()) && (m.status === 'error' || m.status === 'streaming'))
+    );
     const updatedMessages = [...currentMessages, userMessage, emptyAssistantMessage];
 
     // Check if we should auto-generate an informative title from the first prompt
@@ -413,11 +415,17 @@ function App() {
     }
 
     // Prepare context to send to Gemini (all previous completed/stopped + current user message)
+    // Strictly filter out any empty or non-string message contents to avoid validation errors
     const contextHistory = [...currentMessages, userMessage]
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .filter(
+        (m) =>
+          (m.role === 'user' || m.role === 'assistant') &&
+          typeof m.content === 'string' &&
+          m.content.trim().length > 0
+      )
       .map((m) => ({
         role: m.role,
-        content: m.content,
+        content: m.content.trim(),
         attachments: m.attachments,
       }));
 
@@ -524,12 +532,18 @@ function App() {
     setErrorMessage(null);
 
     // Context history BEFORE the assistant response
-    const precedingMessages = activeConversation.messages.slice(0, targetIndex);
+    // Strictly filter out any empty or non-string message contents
+    const precedingMessages = (activeConversation?.messages || []).slice(0, targetIndex);
     const contextHistory = precedingMessages
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .filter(
+        (m) =>
+          (m.role === 'user' || m.role === 'assistant') &&
+          typeof m.content === 'string' &&
+          m.content.trim().length > 0
+      )
       .map((m) => ({
         role: m.role,
-        content: m.content,
+        content: m.content.trim(),
       }));
 
     if (contextHistory.length === 0) return;
@@ -692,7 +706,7 @@ function App() {
       <MainLayout
         conversations={conversations}
         activeId={activeId}
-        activeTitle={activeConversation?.title || 'NOVA AI'}
+        activeTitle={activeConversation?.title || 'SABU AI'}
         isLoadingConversations={isLoadingConversations}
         onSelectConversation={handleSelectConversation}
         onNewChat={handleNewChat}

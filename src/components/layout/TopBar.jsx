@@ -69,7 +69,7 @@ export function TopBar({
           aria-label="Select AI Model"
         >
           <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-          <span>Gemini 2.5 Flash</span>
+          <span>Gemini 3.6 Flash</span>
           <Badge variant="success" className="text-[10px] py-0 px-1.5 hidden sm:inline-flex">
             Live AI
           </Badge>

@@ -334,15 +334,27 @@ describe('Phase 9.3-C: SEC-VULN-09 JWT Revocation & Token Invalidation Suite', (
 
     test('4.3 Legacy user without tokenVersion field is handled safely as version 0', async () => {
       // Simulate legacy user with undefined tokenVersion
-      const legacyUserId = new mongoose.Types.ObjectId().toString();
-      inMemoryUsers.set(legacyUserId, {
-        _id: new mongoose.Types.ObjectId(legacyUserId),
-        email: 'legacy@example.test',
-        displayName: 'Legacy User',
-      });
+      const legacyEmail = `legacy-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@example.test`;
+      let legacyUserId = new mongoose.Types.ObjectId().toString();
+      if (mongoose.connection.readyState === 1) {
+        const legacyDoc = await User.collection.insertOne({
+          email: legacyEmail,
+          displayName: 'Legacy User',
+          passwordHash: await User.hashPassword('SuperSecret123!'),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        legacyUserId = legacyDoc.insertedId.toString();
+      } else {
+        inMemoryUsers.set(legacyUserId, {
+          _id: new mongoose.Types.ObjectId(legacyUserId),
+          email: legacyEmail,
+          displayName: 'Legacy User',
+        });
+      }
 
       // Legacy token without tokenVersion in JWT payload
-      const legacyToken = authService.generateToken({ id: legacyUserId, email: 'legacy@example.test', displayName: 'Legacy User' });
+      const legacyToken = authService.generateToken({ id: legacyUserId, email: legacyEmail, displayName: 'Legacy User' });
       const req = {
         cookies: { [ENV.COOKIE_NAME]: legacyToken },
         headers: {},
@@ -373,15 +385,28 @@ describe('Phase 9.3-C: SEC-VULN-09 JWT Revocation & Token Invalidation Suite', (
     });
 
     test('4.5 Concurrent logout calls atomically increment tokenVersion without race conditions', async () => {
-      const initialDoc = inMemoryUsers.get(userAId);
-      const startVersion = initialDoc?.tokenVersion || 0;
+      let startVersion = 0;
+      if (mongoose.connection.readyState === 1) {
+        const doc = await User.findById(userAId).lean();
+        startVersion = doc?.tokenVersion || 0;
+      } else {
+        const initialDoc = inMemoryUsers.get(userAId);
+        startVersion = initialDoc?.tokenVersion || 0;
+      }
 
       // Fire 5 concurrent revokeUserTokens requests
       const promises = Array.from({ length: 5 }, () => authService.revokeUserTokens(userAId));
       await Promise.all(promises);
 
-      const finalDoc = inMemoryUsers.get(userAId);
-      assert.strictEqual(finalDoc.tokenVersion, startVersion + 5, '5 atomic increments must result in exactly +5 tokenVersion');
+      let finalVersion = 0;
+      if (mongoose.connection.readyState === 1) {
+        const doc = await User.findById(userAId).lean();
+        finalVersion = doc?.tokenVersion || 0;
+      } else {
+        const finalDoc = inMemoryUsers.get(userAId);
+        finalVersion = finalDoc?.tokenVersion || 0;
+      }
+      assert.strictEqual(finalVersion, startVersion + 5, '5 atomic increments must result in exactly +5 tokenVersion');
     });
 
     test('4.6 OptionalAuthenticate ignores revoked tokens without crashing', async () => {
@@ -398,5 +423,11 @@ describe('Phase 9.3-C: SEC-VULN-09 JWT Revocation & Token Invalidation Suite', (
       assert.strictEqual(nextCalled, true);
       assert.strictEqual(req.user, undefined, 'req.user must remain undefined for revoked token in optionalAuthenticate');
     });
+  });
+
+  after(async () => {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
   });
 });

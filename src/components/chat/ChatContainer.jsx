@@ -49,10 +49,10 @@ export function ChatContainer({
       {/* Screen Reader Status Live Region */}
       <div role="status" aria-live="polite" className="sr-only">
         {isGenerating
-          ? 'NOVA AI response generation started'
+          ? 'SABU AI response generation started'
           : errorMessage
           ? `Error: ${errorMessage}`
-          : 'NOVA AI response generation complete'}
+          : 'SABU AI response generation complete'}
       </div>
 
       {/* Main Conversation Stream or Welcome Screen */}

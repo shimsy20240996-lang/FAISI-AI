@@ -246,11 +246,12 @@ describe('Phase 10.6-D: AI, SSE & Database Telemetry Test Suite', () => {
     });
 
     test('7. Model labels are bounded and normalized', () => {
+      assert.equal(normalizeAIModel('gemini-3.6-flash'), 'gemini-3.6-flash');
+      assert.equal(normalizeAIModel('models/gemini-3.6-flash'), 'gemini-3.6-flash');
       assert.equal(normalizeAIModel('gemini-2.5-flash'), 'gemini-2.5-flash');
-      assert.equal(normalizeAIModel('models/gemini-2.5-flash'), 'gemini-2.5-flash');
-      assert.equal(normalizeAIModel('arbitrary-client-string-attack'), 'gemini-2.5-flash');
-      assert.equal(normalizeAIModel(null), 'gemini-2.5-flash');
-      assert.equal(normalizeAIModel(12345), 'gemini-2.5-flash');
+      assert.equal(normalizeAIModel('arbitrary-client-string-attack'), 'gemini-3.6-flash');
+      assert.equal(normalizeAIModel(null), 'gemini-3.6-flash');
+      assert.equal(normalizeAIModel(12345), 'gemini-3.6-flash');
     });
 
     test('8. Operation labels are bounded and normalized', () => {

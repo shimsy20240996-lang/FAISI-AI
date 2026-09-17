@@ -288,14 +288,14 @@ export function Message({
           {/* Author Header & Timestamp */}
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             <span className="text-xs font-semibold text-neutral-200 dark:text-neutral-200 light:text-neutral-800">
-              {isAssistant ? 'NOVA AI' : 'You'}
+              {isAssistant ? 'SABU' : 'You'}
             </span>
             <span className="text-[10px] text-neutral-500 dark:text-neutral-500 light:text-neutral-400">
               {message.timestamp}
             </span>
             {isAssistant && (
               <Badge variant="indigo" className="text-[10px] py-0 px-1.5">
-                Gemini 2.5 Flash
+                Gemini 3.6 Flash
               </Badge>
             )}
             {attachments.length > 0 && (

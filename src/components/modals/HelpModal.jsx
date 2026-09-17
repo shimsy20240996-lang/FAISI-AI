@@ -13,7 +13,7 @@ export function HelpModal({ isOpen, onClose }) {
   ];
 
   const roadmap = [
-    { phase: 'Core Engine', name: 'Gemini 2.5 Flash, Streaming, RAG & Voice', status: 'Completed', current: false },
+    { phase: 'Core Engine', name: 'Gemini 3.6 Flash, Streaming, RAG & Voice', status: 'Completed', current: false },
     { phase: 'Security & Auth', name: 'JWT Sessions, Cloud Sync & Security Hardening', status: 'Completed', current: false },
     { phase: 'Reliability & Speed', name: 'Production Optimization & Resilience', status: 'Completed', current: false },
     { phase: 'Phase 10.5', name: 'Production UX Polish & Accessibility (WCAG 2.2)', status: 'Active (Current)', current: true },
@@ -25,7 +25,7 @@ export function HelpModal({ isOpen, onClose }) {
       isOpen={isOpen}
       onClose={onClose}
       title="Help & Project Roadmap"
-      description="Keyboard shortcuts and development timeline for NOVA AI"
+      description="Keyboard shortcuts and development timeline for SABU AI"
       maxWidth="lg"
     >
       <div className="space-y-6 pt-2">

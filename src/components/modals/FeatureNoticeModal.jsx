@@ -17,7 +17,7 @@ export function FeatureNoticeModal({
       isOpen={isOpen}
       onClose={onClose}
       title={title}
-      description={`NOVA AI Development Roadmap Notice`}
+      description={`SABU AI Development Roadmap Notice`}
       maxWidth="sm"
     >
       <div className="space-y-4 pt-2">

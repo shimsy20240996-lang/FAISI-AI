@@ -22,12 +22,12 @@ export async function getHealth(req, res) {
 
   res.status(200).json({
     success: true,
-    service: 'NOVA AI API',
+    service: 'SABU AI API',
     status: dbConnected ? 'online' : 'degraded',
     aiConfigured: Boolean(ENV.GEMINI_API_KEY && ENV.GEMINI_API_KEY.trim().length > 0),
     database: dbConnected ? 'connected' : 'disconnected',
     model: ENV.GEMINI_MODEL,
-    version: '0.8.0',
+    version: '0.8.1',
   });
 }
 

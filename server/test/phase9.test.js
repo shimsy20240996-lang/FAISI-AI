@@ -1,5 +1,6 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import AdmZip from 'adm-zip';
@@ -709,5 +710,11 @@ describe('Phase 9.2: Critical Security Remediation & Security Regression Suite',
       const isMatch = await userA.verifyPassword('Password123!');
       assert.equal(isMatch, true);
     });
+  });
+
+  after(async () => {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
   });
 });

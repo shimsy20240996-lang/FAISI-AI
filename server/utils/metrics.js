@@ -172,12 +172,12 @@ export function normalizeAIOperation(operation) {
  * @returns {string}
  */
 export function normalizeAIModel(model) {
-  if (typeof model !== 'string') return 'gemini-2.5-flash';
+  if (typeof model !== 'string') return 'gemini-3.6-flash';
   const m = model.trim().toLowerCase();
   if (m.startsWith('gemini-') || m.startsWith('models/')) {
     return m.replace(/^models\//, '').slice(0, 50);
   }
-  return 'gemini-2.5-flash';
+  return 'gemini-3.6-flash';
 }
 
 /**

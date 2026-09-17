@@ -1,14 +1,14 @@
 /**
  * Application Constants
- * Core configuration, phase metadata, and default starter threads for NOVA AI.
+ * Core configuration, phase metadata, and default starter threads for SABU AI.
  */
 
 export const APP_CONFIG = {
-  NAME: 'NOVA AI',
+  NAME: 'SABU AI',
   VERSION: '0.3.0',
   CURRENT_PHASE: 'Phase 3 — Streaming + Conversation Engine',
   STATUS: 'Live SSE Streaming',
-  MODEL: 'gemini-2.5-flash',
+  MODEL: 'gemini-3.6-flash',
   ENVIRONMENT: import.meta.env.MODE || 'development',
 };
 

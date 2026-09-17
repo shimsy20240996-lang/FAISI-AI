@@ -85,7 +85,7 @@ describe('Phase 7: RAG / Knowledge Base Comprehensive Test Suite', () => {
         storageProvider: 'local',
         status: 'ready',
         extractedText:
-          '# NOVA AI Architecture\n\nNOVA AI uses Gemini 2.5 Flash for chat and Gemini Embedding 2 for vector indexing.\nEmbeddings have 768 dimensions with strict output dimensionality configuration.\nChunking preserves sentence boundaries with 100 character overlaps.',
+          '# NOVA AI Architecture\n\nNOVA AI uses Gemini 3.6 Flash for chat and Gemini Embedding 2 for vector indexing.\nEmbeddings have 768 dimensions with strict output dimensionality configuration.\nChunking preserves sentence boundaries with 100 character overlaps.',
         extractedTextLength: 260,
       });
       await docA1.save();

@@ -1,6 +1,6 @@
 /**
- * NOVA AI — Frontend API Client (Phase 5)
- * Securely communicates with the NOVA Express backend and MongoDB persistence layer.
+ * SABU AI — Frontend API Client (Phase 5)
+ * Securely communicates with the SABU Express backend and MongoDB persistence layer.
  * All authenticated requests use credentials: 'include' for secure HTTP-only cookie transmission.
  * Zero AI API keys, MongoDB credentials, or JWT tokens are stored or handled on the client.
  */

@@ -7,7 +7,7 @@ import Button from '../common/Button';
 export function ModelSelectorModal({ isOpen, onClose }) {
   const models = [
     {
-      name: 'Google Gemini 2.5 Flash',
+      name: 'Google Gemini 3.6 Flash',
       provider: 'Google AI (Official SDK)',
       description: 'High-speed reasoning, coding, writing, and structured analysis. Active backend provider.',
       badge: 'Active Provider',
@@ -37,14 +37,14 @@ export function ModelSelectorModal({ isOpen, onClose }) {
       isOpen={isOpen}
       onClose={onClose}
       title="Active AI Model & Providers"
-      description="NOVA AI multi-model architecture configuration"
+      description="SABU AI multi-model architecture configuration"
       maxWidth="md"
     >
       <div className="space-y-4 pt-2">
         <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-800/40 flex items-start gap-2.5">
           <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
           <p className="text-xs text-indigo-300 leading-relaxed">
-            Live AI responses are securely generated on the Node.js backend using <strong>Google Gemini 2.5 Flash</strong> via the official <code>@google/genai</code> SDK.
+            Live AI responses are securely generated on the Node.js backend using <strong>Google Gemini 3.6 Flash</strong> via the official <code>@google/genai</code> SDK.
           </p>
         </div>
 

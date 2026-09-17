@@ -1,4 +1,4 @@
-# NOVA AI — Release Notes
+# SABU AI — Release Notes
 
 ## Version: v0.8.1 (Production Release Candidate)
 **Release Stage:** Production Release Candidate  
@@ -9,7 +9,7 @@
 
 ## 🌟 Highlights & Capabilities
 
-NOVA AI is a multi-tenant, full-stack AI workspace and assistant platform powered by Google Gemini. The v0.8.1 Production Release Candidate aggregates all capabilities across Phases 0 through 10.8:
+SABU AI is a multi-tenant, full-stack AI workspace and assistant platform powered by Google Gemini. The v0.8.1 Production Release Candidate aggregates all capabilities across Phases 0 through 10.8:
 
 ### 1. Intelligent Chat & Streaming Engine
 - Progressive Server-Sent Events (SSE) streaming with non-buffering (`X-Accel-Buffering: no`).
@@ -55,7 +55,7 @@ NOVA AI is a multi-tenant, full-stack AI workspace and assistant platform powere
 
 ## 🔒 Security Summary
 
-NOVA AI enforces defense-in-depth across all application layers:
+SABU AI enforces defense-in-depth across all application layers:
 - **Zero Client Secrets**: All API keys, database credentials, and signing secrets reside exclusively server-side.
 - **Content Security Policy (CSP)**: Strict deny-by-default CSP configured via `helmet`.
 - **CORS & CSRF Origin Enforcement**: Strict allowlist validation against `CLIENT_URL` for all state-changing endpoints (`POST`, `PATCH`, `DELETE`).
@@ -66,7 +66,7 @@ NOVA AI enforces defense-in-depth across all application layers:
 
 ## ⚙️ Production Deployment & Infrastructure
 
-NOVA AI supports two deployment patterns:
+SABU AI supports two deployment patterns:
 - **Option A (Unified Same-Origin, Recommended)**: Express serves both the backend API and the static `/dist` frontend assets from a single origin. Simplifies cookies and CORS.
 - **Option B (Split-Origin)**: Frontend hosted on CDN/static host and API hosted on separate backend service. Requires exact `CLIENT_URL` configuration.
 

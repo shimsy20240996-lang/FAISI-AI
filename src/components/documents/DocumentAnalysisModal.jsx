@@ -75,7 +75,7 @@ export default function DocumentAnalysisModal({ document, isOpen, onClose }) {
                   AI Document Analysis
                 </h3>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-                  Gemini 2.5 Flash
+                  Gemini 3.6 Flash
                 </span>
               </div>
               <p className="text-xs text-white/50 truncate mt-0.5" title={document.originalName}>
@@ -179,7 +179,7 @@ export default function DocumentAnalysisModal({ document, isOpen, onClose }) {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-semibold text-cyan-300">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>Gemini 2.5 Flash Insights:</span>
+                  <span>Gemini 3.6 Flash Insights:</span>
                 </div>
                 <button
                   type="button"
