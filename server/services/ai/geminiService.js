@@ -10,9 +10,18 @@ import { recordAITelemetry, recordAIRetryTelemetry, normalizeStatusClass } from 
 export function isTransientError(error) {
   if (!error) return false;
   const msg = (error.message || '').toLowerCase();
-  const code = error.code || error.status || error.statusCode;
+  const code = Number(error.code || error.status || error.statusCode);
 
-  if (code === 429 || code === 503 || code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN') {
+  if (
+    code === 429 ||
+    code === 500 ||
+    code === 502 ||
+    code === 503 ||
+    code === 504 ||
+    error.code === 'ECONNRESET' ||
+    error.code === 'ETIMEDOUT' ||
+    error.code === 'EAI_AGAIN'
+  ) {
     return true;
   }
   if (
@@ -20,6 +29,8 @@ export function isTransientError(error) {
     msg.includes('rate limit') ||
     msg.includes('temporarily unavailable') ||
     msg.includes('service unavailable') ||
+    msg.includes('unavailable') ||
+    msg.includes('high demand') ||
     msg.includes('econnreset') ||
     msg.includes('etimedout')
   ) {
@@ -393,102 +404,120 @@ class GeminiService {
     const ai = this.getClient();
     const contents = this.formatMessages(messages);
 
-    let timeoutHandle;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new TimeoutError('Gemini API streaming timed out.'));
-      }, ENV.AI_STREAM_TIMEOUT_MS);
-    });
+    const maxRetries = 2;
+    const baseDelayMs = 500;
+    const maxDelayMs = 2000;
+    let attempt = 0;
 
-    try {
+    while (true) {
       if (signal?.aborted) return;
 
-      const responseStream = await executeWithTransientRetry(
-        async () => {
-          return await Promise.race([
-            ai.models.generateContentStream({
-              model: this.modelName,
-              contents,
-              config: {
-                systemInstruction,
-              },
-            }),
-            timeoutPromise,
-          ]);
-        },
-        {
-          maxRetries: 2,
-          baseDelayMs: 500,
-          maxDelayMs: 2000,
-          onRetry: () => recordAIRetryTelemetry({ operation, model }),
+      let timeoutHandle;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new TimeoutError('Gemini API streaming timed out.'));
+        }, ENV.AI_STREAM_TIMEOUT_MS);
+      });
+
+      let chunksEmitted = 0;
+
+      try {
+        const responseStreamPromise = ai.models.generateContentStream({
+          model: this.modelName,
+          contents,
+          config: {
+            systemInstruction,
+          },
+        });
+
+        const responseStream = await Promise.race([
+          responseStreamPromise,
+          timeoutPromise,
+        ]);
+
+        for await (const chunk of responseStream) {
+          if (signal?.aborted) {
+            break;
+          }
+
+          const candidate = chunk?.candidates?.[0];
+          const text =
+            chunk?.text ||
+            candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('') ||
+            '';
+
+          if (text) {
+            chunksEmitted++;
+            onChunk(text);
+          }
         }
-      );
 
-      for await (const chunk of responseStream) {
-        if (signal?.aborted) {
-          break;
+        clearTimeout(timeoutHandle);
+
+        if (!signal?.aborted) {
+          const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+          recordAITelemetry({ operation, model, statusClass: '2xx', durationMs, isError: false });
         }
-
-        const candidate = chunk?.candidates?.[0];
-        const text =
-          chunk?.text ||
-          candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('') ||
-          '';
-
-        if (text) {
-          onChunk(text);
-        }
-      }
-
-      clearTimeout(timeoutHandle);
-
-      if (!signal?.aborted) {
-        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
-        recordAITelemetry({ operation, model, statusClass: '2xx', durationMs, isError: false });
-      }
-    } catch (error) {
-      clearTimeout(timeoutHandle);
-
-      if (signal?.aborted) {
-        // Normal client cancellation, silently stop
         return;
-      }
+      } catch (error) {
+        clearTimeout(timeoutHandle);
 
-      const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
-      const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
-      recordAITelemetry({ operation, model, statusClass, durationMs, isError: true });
+        if (signal?.aborted) {
+          // Normal client cancellation, silently stop
+          return;
+        }
 
-      if (error instanceof TimeoutError || error instanceof AIProviderError) {
-        throw error;
-      }
+        // Retry if no chunks were emitted to the client yet, error is transient, and attempts remain
+        if (chunksEmitted === 0 && isTransientError(error) && attempt < maxRetries) {
+          attempt++;
+          recordAIRetryTelemetry({ operation, model });
+          if (ENV.NODE_ENV !== 'test') {
+            console.warn(
+              `⚠️  [GeminiService Streaming Retry] Transient failure (attempt ${attempt}/${maxRetries}): ${error.message}. Retrying with backoff...`
+            );
+          }
+          const jitter = Math.random() * 50;
+          const delay = Math.min(baseDelayMs * Math.pow(2, attempt - 1) + jitter, maxDelayMs);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
 
-      const errorMessage = error.message || 'Unknown upstream streaming error';
-      const sanitizedMsg = errorMessage.replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]');
-      if (ENV.NODE_ENV !== 'test') {
-        console.error('🔴 [GeminiService Streaming Error]:', sanitizedMsg);
-      }
+        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+        const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
+        recordAITelemetry({ operation, model, statusClass, durationMs, isError: true });
 
-      if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('invalid api key')) {
+        if (error instanceof TimeoutError || error instanceof AIProviderError) {
+          throw error;
+        }
+
+        const errorMessage = error.message || 'Unknown upstream streaming error';
+        const sanitizedMsg = errorMessage.replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]');
+        if (ENV.NODE_ENV !== 'test') {
+          console.error('🔴 [GeminiService Streaming Error]:', sanitizedMsg);
+        }
+
+        if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('invalid api key')) {
+          throw new AIProviderError(
+            'The configured Gemini API key is invalid. Please check your server environment configuration.',
+            502,
+            'INVALID_API_KEY'
+          );
+        }
+
+        if (errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota')) {
+          throw new AIProviderError(
+            'Gemini API rate limit or quota exceeded. Please wait a moment and try again.',
+            429,
+            'RATE_LIMIT_EXCEEDED'
+          );
+        }
+
         throw new AIProviderError(
-          'The configured Gemini API key is invalid. Please check your server environment configuration.',
+          'Upstream AI service encountered an error while streaming response.',
           502,
-          'INVALID_API_KEY'
+          'UPSTREAM_SERVICE_ERROR'
         );
       }
-
-      if (errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota')) {
-        throw new AIProviderError(
-          'Gemini API rate limit or quota exceeded. Please wait a moment and try again.',
-          429,
-          'RATE_LIMIT_EXCEEDED'
-        );
-      }
-
-      throw new AIProviderError(
-        'Upstream AI service encountered an error while streaming response.',
-        502,
-        'UPSTREAM_SERVICE_ERROR'
-      );
     }
   }
 }
