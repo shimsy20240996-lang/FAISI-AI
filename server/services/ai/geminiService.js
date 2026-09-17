@@ -403,16 +403,26 @@ class GeminiService {
     try {
       if (signal?.aborted) return;
 
-      const responseStream = await Promise.race([
-        ai.models.generateContentStream({
-          model: this.modelName,
-          contents,
-          config: {
-            systemInstruction,
-          },
-        }),
-        timeoutPromise,
-      ]);
+      const responseStream = await executeWithTransientRetry(
+        async () => {
+          return await Promise.race([
+            ai.models.generateContentStream({
+              model: this.modelName,
+              contents,
+              config: {
+                systemInstruction,
+              },
+            }),
+            timeoutPromise,
+          ]);
+        },
+        {
+          maxRetries: 2,
+          baseDelayMs: 500,
+          maxDelayMs: 2000,
+          onRetry: () => recordAIRetryTelemetry({ operation, model }),
+        }
+      );
 
       for await (const chunk of responseStream) {
         if (signal?.aborted) {

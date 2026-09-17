@@ -34,7 +34,7 @@ export const ENV = {
   PORT: parseInt(process.env.PORT || '5000', 10),
   NODE_ENV: process.env.NODE_ENV || 'development',
   LOG_LEVEL: (process.env.LOG_LEVEL || defaultLogLevel).toUpperCase(),
-  CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:3000',
+  CLIENT_URL: process.env.CLIENT_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
   REQUEST_TIMEOUT_MS: parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10),

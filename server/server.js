@@ -53,27 +53,45 @@ if (existsSync(distPath)) {
 }
 
 // CORS configuration restricted to configured client origin with credentials enabled (scoped to /api routes)
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin) {
-      return callback(null, true);
-    }
-    const cleanOrigin = origin.replace(/\/+$/, '');
-    const cleanClientUrl = (ENV.CLIENT_URL || '').replace(/\/+$/, '');
-    if (cleanOrigin === cleanClientUrl) {
-      return callback(null, true);
-    }
-    if (ENV.NODE_ENV !== 'production' && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
-      return callback(null, true);
-    }
-    return callback(new Error(`CORS blocked for unauthorized origin: ${origin}`));
-  },
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-client-id', 'x-request-id'],
-  exposedHeaders: ['X-Request-Id'],
-  credentials: true,
+const corsOptionsDelegate = (req, callback) => {
+  const origin = req.headers.origin;
+  if (!origin) {
+    return callback(null, {
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'x-client-id', 'x-request-id', 'Authorization', 'X-Requested-With'],
+      exposedHeaders: ['X-Request-Id'],
+    });
+  }
+
+  const cleanOrigin = origin.replace(/\/+$/, '').toLowerCase();
+  const cleanClientUrl = (ENV.CLIENT_URL || '').replace(/\/+$/, '').toLowerCase();
+  const renderUrl = (process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '').toLowerCase();
+  const host = req.headers.host;
+  const sameOriginHttp = host ? `http://${host}`.toLowerCase() : null;
+  const sameOriginHttps = host ? `https://${host}`.toLowerCase() : null;
+
+  const isAllowed =
+    cleanOrigin === cleanClientUrl ||
+    (renderUrl && cleanOrigin === renderUrl) ||
+    (sameOriginHttp && cleanOrigin === sameOriginHttp) ||
+    (sameOriginHttps && cleanOrigin === sameOriginHttps) ||
+    (ENV.NODE_ENV !== 'production' && (cleanOrigin.startsWith('http://localhost:') || cleanOrigin.startsWith('http://127.0.0.1:')));
+
+  if (isAllowed) {
+    return callback(null, {
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'x-client-id', 'x-request-id', 'Authorization', 'X-Requested-With'],
+      exposedHeaders: ['X-Request-Id'],
+    });
+  }
+
+  return callback(new Error(`CORS blocked for unauthorized origin: ${origin}`));
 };
-app.use('/api', cors(corsOptions));
+app.use('/api', cors(corsOptionsDelegate));
 
 // Request Correlation & Async Context Foundation
 app.use(requestIdMiddleware);
