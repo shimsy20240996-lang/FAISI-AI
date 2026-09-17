@@ -17,7 +17,7 @@ dist-ssr
 coverage
 
 # Local Storage
-storage/
+/storage/
 
 # Editor & IDE
 .vscode
