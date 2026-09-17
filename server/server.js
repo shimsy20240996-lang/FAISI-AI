@@ -47,13 +47,20 @@ app.use(
   })
 );
 
-// CORS configuration restricted to configured client origin with credentials enabled
+// Serve static frontend assets if dist exists (Option A: Same-Origin Deployment)
+if (existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
+
+// CORS configuration restricted to configured client origin with credentials enabled (scoped to /api routes)
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) {
       return callback(null, true);
     }
-    if (origin === ENV.CLIENT_URL) {
+    const cleanOrigin = origin.replace(/\/+$/, '');
+    const cleanClientUrl = (ENV.CLIENT_URL || '').replace(/\/+$/, '');
+    if (cleanOrigin === cleanClientUrl) {
       return callback(null, true);
     }
     if (ENV.NODE_ENV !== 'production' && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
@@ -66,7 +73,7 @@ const corsOptions = {
   exposedHeaders: ['X-Request-Id'],
   credentials: true,
 };
-app.use(cors(corsOptions));
+app.use('/api', cors(corsOptions));
 
 // Request Correlation & Async Context Foundation
 app.use(requestIdMiddleware);
@@ -140,11 +147,6 @@ app.get('/api/ready', (req, res) => {
   });
 });
 
-// Serve static frontend assets if dist exists (Option A: Same-Origin Deployment)
-if (existsSync(distPath)) {
-  app.use(express.static(distPath));
-}
-
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api', chatRoutes);
@@ -164,6 +166,11 @@ app.use((req, res) => {
         code: 'NOT_FOUND',
       },
     });
+  }
+
+  // Missing static asset requests return clean 404 instead of SPA HTML/JSON
+  if (req.path.startsWith('/assets/')) {
+    return res.status(404).type('text/plain').send('Asset not found');
   }
 
   const indexPath = path.join(distPath, 'index.html');
