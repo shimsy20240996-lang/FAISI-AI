@@ -16,14 +16,18 @@ class AIService {
    *   messages: Array<{ role: string, content: string }>,
    *   systemInstruction?: string,
    *   attachments?: Array<{ type: string, mimeType: string, data?: string }>,
+   *   signal?: AbortSignal,
+   *   onModelSelected?: (model: string) => void,
    *   provider?: string,
    * }} params
-   * @returns {Promise<{ role: 'assistant', content: string }>}
+   * @returns {Promise<{ role: 'assistant', content: string, model: string }>}
    */
   async generateResponse({
     messages,
     systemInstruction = NOVA_SYSTEM_INSTRUCTION,
     attachments,
+    signal,
+    onModelSelected,
     provider = 'gemini',
   }) {
     let effectiveMessages = [...messages];
@@ -43,6 +47,8 @@ class AIService {
         return await this.defaultProvider.generateResponse({
           messages: effectiveMessages,
           systemInstruction,
+          signal,
+          onModelSelected,
         });
     }
   }
@@ -53,15 +59,17 @@ class AIService {
    *   messages: Array<{ role: string, content: string }>,
    *   systemInstruction?: string,
    *   onChunk: (text: string) => void,
+   *   onModelSelected?: (model: string) => void,
    *   signal?: AbortSignal,
    *   provider?: string,
    * }} params
-   * @returns {Promise<void>}
+   * @returns {Promise<{ model: string }>}
    */
   async streamResponse({
     messages,
     systemInstruction = NOVA_SYSTEM_INSTRUCTION,
     onChunk,
+    onModelSelected,
     signal,
     provider = 'gemini',
   }) {
@@ -72,6 +80,7 @@ class AIService {
           messages,
           systemInstruction,
           onChunk,
+          onModelSelected,
           signal,
         });
     }
@@ -83,6 +92,8 @@ class AIService {
    *   documentText: string,
    *   fileName: string,
    *   instruction?: string,
+   *   signal?: AbortSignal,
+   *   onModelSelected?: (model: string) => void,
    *   provider?: string,
    * }} params
    * @returns {Promise<{ role: 'assistant', content: string, model: string }>}
@@ -91,6 +102,8 @@ class AIService {
     documentText,
     fileName,
     instruction,
+    signal,
+    onModelSelected,
     provider = 'gemini',
   }) {
     switch (provider.toLowerCase()) {
@@ -100,6 +113,8 @@ class AIService {
           documentText,
           fileName,
           instruction,
+          signal,
+          onModelSelected,
         });
     }
   }

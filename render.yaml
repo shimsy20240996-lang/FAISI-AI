@@ -17,6 +17,8 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.6-flash
+      - key: GEMINI_FALLBACK_MODEL
+        value: gemini-3.5-flash-lite
       - key: VECTOR_STORE_TYPE
         value: mongodb_atlas
       - key: ALLOW_IN_MEMORY_VECTOR_STORE_IN_PROD

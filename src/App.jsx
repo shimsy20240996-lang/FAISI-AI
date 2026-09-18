@@ -458,6 +458,21 @@ function App() {
               })
             );
           },
+          onModel: (model) => {
+            if (model) {
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id === activeId) {
+                    const msgs = (c.messages || []).map((m) =>
+                      m.id === assistantMessageId ? { ...m, model } : m
+                    );
+                    return { ...c, messages: msgs };
+                  }
+                  return c;
+                })
+              );
+            }
+          },
           onChunk: (chunk) => {
             setConversations((prev) =>
               prev.map((c) => {
@@ -590,6 +605,21 @@ function App() {
                 return c;
               })
             );
+          },
+          onModel: (model) => {
+            if (model) {
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id === activeId) {
+                    const msgs = (c.messages || []).map((m) =>
+                      m.id === assistantMessageId ? { ...m, model } : m
+                    );
+                    return { ...c, messages: msgs };
+                  }
+                  return c;
+                })
+              );
+            }
           },
           onChunk: (chunk) => {
             setConversations((prev) =>

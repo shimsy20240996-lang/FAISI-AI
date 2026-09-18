@@ -37,6 +37,9 @@ export const ENV = {
   CLIENT_URL: process.env.CLIENT_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
+  GEMINI_FALLBACK_MODEL: process.env.GEMINI_FALLBACK_MODEL !== undefined
+    ? process.env.GEMINI_FALLBACK_MODEL.trim()
+    : 'gemini-3.5-flash-lite',
   REQUEST_TIMEOUT_MS: parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10),
   AI_STREAM_TIMEOUT_MS: parseInt(process.env.AI_STREAM_TIMEOUT_MS || '60000', 10),
   MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/nova_ai',

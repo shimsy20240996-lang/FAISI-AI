@@ -3,6 +3,28 @@ import { ENV } from '../../config/env.js';
 import { AIProviderError, TimeoutError } from '../../utils/errors.js';
 import { NOVA_SYSTEM_INSTRUCTION } from './systemPrompt.js';
 import { recordAITelemetry, recordAIRetryTelemetry, normalizeStatusClass } from '../../utils/metrics.js';
+import { logger } from '../../utils/logger.js';
+
+/**
+ * Resolves the primary and fallback AI model configuration.
+ * @param {object} [customEnv=ENV]
+ * @returns {{ primaryModel: string, fallbackModel: string | null }}
+ */
+export function getAIModelConfig(customEnv = ENV) {
+  const env = customEnv || ENV;
+  const configuredModel = (env.GEMINI_MODEL || 'gemini-3.6-flash').trim();
+  const primaryModel = configuredModel === 'gemini-2.5-flash' ? 'gemini-3.6-flash' : configuredModel;
+
+  let configuredFallback = env.GEMINI_FALLBACK_MODEL !== undefined
+    ? String(env.GEMINI_FALLBACK_MODEL).trim()
+    : 'gemini-3.5-flash-lite';
+
+  const fallbackModel = (configuredFallback && configuredFallback !== primaryModel)
+    ? configuredFallback
+    : null;
+
+  return { primaryModel, fallbackModel };
+}
 
 /**
  * Checks whether an error is transient (e.g. rate limit, temporary network failure, 503 unavailable)
@@ -32,7 +54,8 @@ export function isTransientError(error) {
     msg.includes('unavailable') ||
     msg.includes('high demand') ||
     msg.includes('econnreset') ||
-    msg.includes('etimedout')
+    msg.includes('etimedout') ||
+    msg.includes('eai_again')
   ) {
     return true;
   }
@@ -40,17 +63,100 @@ export function isTransientError(error) {
 }
 
 /**
+ * Normalizes upstream AI errors into distinct, user-friendly categorized errors without exposing raw keys, JSON, or stack traces.
+ * @param {Error|any} error
+ * @param {string} [context='processing']
+ * @returns {AIProviderError|TimeoutError}
+ */
+export function normalizeAIError(error, context = 'processing') {
+  if (error instanceof TimeoutError || error instanceof AIProviderError) {
+    return error;
+  }
+
+  const errorMessage = error?.message || 'Unknown upstream AI error';
+  const sanitizedMsg = errorMessage
+    .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+    .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]');
+
+  if (ENV.NODE_ENV !== 'test') {
+    console.error(`🔴 [GeminiService Error in ${context}]:`, sanitizedMsg);
+  }
+
+  const code = Number(error?.code || error?.status || error?.statusCode);
+  const msg = errorMessage.toLowerCase();
+
+  // 1. Invalid API Key / Auth (401)
+  if (
+    code === 401 ||
+    msg.includes('api_key_invalid') ||
+    msg.includes('invalid api key') ||
+    msg.includes('api key not valid')
+  ) {
+    return new AIProviderError(
+      'SABU is temporarily unable to connect to its AI service.',
+      401,
+      'INVALID_API_KEY'
+    );
+  }
+
+  // 2. Rate Limited (429)
+  if (
+    code === 429 ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('rate limit') ||
+    msg.includes('quota')
+  ) {
+    return new AIProviderError(
+      'SABU is temporarily rate-limited. Please try again in a moment.',
+      429,
+      'RATE_LIMIT_EXCEEDED'
+    );
+  }
+
+  // 3. 503 / High Demand / Temporary Unavailable
+  if (
+    code === 503 ||
+    msg.includes('503') ||
+    msg.includes('high demand') ||
+    msg.includes('temporarily unavailable') ||
+    msg.includes('service unavailable') ||
+    msg.includes('unavailable')
+  ) {
+    return new AIProviderError(
+      'SABU is experiencing high demand right now. Please try again in a moment.',
+      503,
+      'MODEL_HIGH_DEMAND'
+    );
+  }
+
+  // 4. Other Upstream Service Errors
+  return new AIProviderError(
+    'SABU couldn\'t reach the AI service right now. Please try again shortly.',
+    code && code >= 400 && code < 600 ? code : 502,
+    'UPSTREAM_SERVICE_ERROR'
+  );
+}
+
+/**
  * Executes an async operation with bounded exponential backoff and jitter for transient errors.
  */
 export async function executeWithTransientRetry(
   fn,
-  { maxRetries = 2, baseDelayMs = 300, maxDelayMs = 1500, onRetry } = {}
+  { maxRetries = 2, baseDelayMs = 300, maxDelayMs = 1500, onRetry, signal } = {}
 ) {
   let attempt = 0;
   while (true) {
+    if (signal?.aborted) {
+      return null;
+    }
+
     try {
       return await fn();
     } catch (err) {
+      if (signal?.aborted) {
+        return null;
+      }
+
       attempt++;
       if (attempt > maxRetries || !isTransientError(err)) {
         throw err;
@@ -72,9 +178,16 @@ export async function executeWithTransientRetry(
 class GeminiService {
   constructor() {
     this.client = null;
-    const configuredModel = ENV.GEMINI_MODEL || 'gemini-3.6-flash';
-    // If configured with legacy discontinued gemini-2.5-flash, upgrade to active gemini-3.6-flash
-    this.modelName = configuredModel === 'gemini-2.5-flash' ? 'gemini-3.6-flash' : configuredModel;
+    this.updateModels();
+  }
+
+  /**
+   * Refreshes model selection from centralized configuration.
+   */
+  updateModels() {
+    const { primaryModel, fallbackModel } = getAIModelConfig();
+    this.modelName = primaryModel;
+    this.fallbackModel = fallbackModel;
   }
 
   /**
@@ -145,383 +258,493 @@ class GeminiService {
   }
 
   /**
-   * Generates a non-streaming response from Google Gemini model with timeout protection and transient retry.
+   * Generates a non-streaming response from Google Gemini model with timeout protection, transient retry, and fallback.
    * @param {{
    *   messages: Array<{ role: string, content: string }>,
    *   systemInstruction?: string,
+   *   signal?: AbortSignal,
+   *   onModelSelected?: (model: string) => void,
    * }} params
-   * @returns {Promise<{ role: 'assistant', content: string }>}
+   * @returns {Promise<{ role: 'assistant', content: string, model: string }>}
    */
-  async generateResponse({ messages, systemInstruction = NOVA_SYSTEM_INSTRUCTION }) {
+  async generateResponse({
+    messages,
+    systemInstruction = NOVA_SYSTEM_INSTRUCTION,
+    signal,
+    onModelSelected,
+  }) {
     const startHr = process.hrtime.bigint();
     const operation = 'chat';
-    const model = this.modelName;
+    const { primaryModel, fallbackModel } = getAIModelConfig();
 
-    try {
-      const result = await executeWithTransientRetry(
-        async () => {
-          const ai = this.getClient();
-          const contents = this.formatMessages(messages);
+    const modelsToTry = [primaryModel];
+    if (fallbackModel && fallbackModel !== primaryModel) {
+      modelsToTry.push(fallbackModel);
+    }
 
-          let timeoutHandle;
-          const timeoutPromise = new Promise((_, reject) => {
-            timeoutHandle = setTimeout(() => {
-              reject(new TimeoutError('Gemini API timed out while generating response.'));
-            }, ENV.REQUEST_TIMEOUT_MS);
-          });
+    let lastError = null;
 
-          try {
-            const generatePromise = ai.models.generateContent({
-              model: this.modelName,
-              contents,
-              config: {
-                systemInstruction,
-              },
+    for (let modelIdx = 0; modelIdx < modelsToTry.length; modelIdx++) {
+      if (signal?.aborted) {
+        return { role: 'assistant', content: '', model: modelsToTry[modelIdx] };
+      }
+
+      const currentModel = modelsToTry[modelIdx];
+      const isFallback = modelIdx > 0;
+
+      if (typeof onModelSelected === 'function') {
+        onModelSelected(currentModel);
+      }
+
+      const maxRetries = isFallback ? 0 : 2;
+
+      try {
+        const result = await executeWithTransientRetry(
+          async () => {
+            if (signal?.aborted) return null;
+            const ai = this.getClient();
+            const contents = this.formatMessages(messages);
+
+            let timeoutHandle;
+            const timeoutPromise = new Promise((_, reject) => {
+              timeoutHandle = setTimeout(() => {
+                reject(new TimeoutError('Gemini API timed out while generating response.'));
+              }, ENV.REQUEST_TIMEOUT_MS);
             });
 
-            const response = await Promise.race([generatePromise, timeoutPromise]);
-            clearTimeout(timeoutHandle);
+            try {
+              const generatePromise = ai.models.generateContent({
+                model: currentModel,
+                contents,
+                config: {
+                  systemInstruction,
+                },
+              });
 
-            const candidate = response?.candidates?.[0];
-            const text =
-              response?.text ||
-              candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n') ||
-              '';
+              const response = await Promise.race([generatePromise, timeoutPromise]);
+              clearTimeout(timeoutHandle);
 
-            if (!text) {
-              throw new AIProviderError(
-                'No text was returned by the AI model. The content may have been blocked or empty.',
-                502,
-                'EMPTY_AI_RESPONSE'
-              );
-            }
+              if (signal?.aborted) return null;
 
-            return {
-              role: 'assistant',
-              content: text.trim(),
-            };
-          } catch (error) {
-            clearTimeout(timeoutHandle);
+              const candidate = response?.candidates?.[0];
+              const text =
+                response?.text ||
+                candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n') ||
+                '';
 
-            if (error instanceof TimeoutError || error instanceof AIProviderError) {
+              if (!text) {
+                throw new AIProviderError(
+                  'No text was returned by the AI model. The content may have been blocked or empty.',
+                  502,
+                  'EMPTY_AI_RESPONSE'
+                );
+              }
+
+              return {
+                role: 'assistant',
+                content: text.trim(),
+                model: currentModel,
+              };
+            } catch (error) {
+              clearTimeout(timeoutHandle);
               throw error;
             }
+          },
+          {
+            maxRetries,
+            baseDelayMs: 300,
+            maxDelayMs: 1500,
+            signal,
+            onRetry: () => recordAIRetryTelemetry({ operation, model: currentModel }),
+          }
+        );
 
-            const errorMessage = error.message || 'Unknown upstream AI error';
-            const sanitizedMsg = errorMessage.replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]');
-            if (ENV.NODE_ENV !== 'test') {
-              console.error('🔴 [GeminiService Error]:', sanitizedMsg);
-            }
+        if (signal?.aborted || !result) {
+          return { role: 'assistant', content: '', model: currentModel };
+        }
 
-            if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('invalid api key')) {
-              throw new AIProviderError(
-                'The configured Gemini API key is invalid. Please check your server environment configuration.',
-                502,
-                'INVALID_API_KEY'
-              );
-            }
+        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+        recordAITelemetry({ operation, model: currentModel, statusClass: '2xx', durationMs, isError: false });
+        return result;
+      } catch (error) {
+        lastError = error;
+        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+        const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
+        recordAITelemetry({ operation, model: currentModel, statusClass, durationMs, isError: true });
 
-            if (errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota')) {
-              throw new AIProviderError(
-                'Gemini API rate limit or quota exceeded. Please wait a moment and try again.',
-                429,
-                'RATE_LIMIT_EXCEEDED'
-              );
-            }
+        // If error is transient and fallback is available, log and attempt fallback
+        if (isTransientError(error) && modelIdx < modelsToTry.length - 1 && !signal?.aborted) {
+          const nextModel = modelsToTry[modelIdx + 1];
+          const rawReason = String(error.code || error.status || error.statusCode || error.message || 'transient_failure');
+          const sanitizedReason = rawReason
+            .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+            .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
+            .slice(0, 100);
 
-            throw new AIProviderError(
-              'Upstream AI service encountered an error while processing your request.',
-              502,
-              'UPSTREAM_SERVICE_ERROR'
+          logger.warn('gemini.model.fallback', {
+            message: 'Primary model unavailable after retries.',
+            primary: currentModel,
+            fallback: nextModel,
+            reason: sanitizedReason,
+          });
+
+          if (ENV.NODE_ENV !== 'test') {
+            console.warn(
+              `[GeminiService Fallback]\nPrimary model unavailable after retries.\nprimary=${currentModel}\nfallback=${nextModel}\nreason=${sanitizedReason}`
             );
           }
-        },
-        {
-          onRetry: () => recordAIRetryTelemetry({ operation, model }),
+          continue;
         }
-      );
 
-      const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
-      recordAITelemetry({ operation, model, statusClass: '2xx', durationMs, isError: false });
-      return result;
-    } catch (error) {
-      const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
-      const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
-      recordAITelemetry({ operation, model, statusClass, durationMs, isError: true });
-      throw error;
+        throw normalizeAIError(error, 'chat');
+      }
     }
+
+    throw normalizeAIError(lastError, 'chat');
   }
 
   /**
-   * Analyzes an uploaded document with prompt-injection defenses, bounded context, and transient retry.
+   * Analyzes an uploaded document with prompt-injection defenses, bounded context, transient retry, and fallback.
    * @param {{
    *   documentText: string,
    *   fileName: string,
    *   instruction?: string,
+   *   signal?: AbortSignal,
+   *   onModelSelected?: (model: string) => void,
    * }} params
    * @returns {Promise<{ role: 'assistant', content: string, model: string }>}
    */
-  async analyzeDocument({ documentText, fileName, instruction = 'Please provide a comprehensive summary and key takeaways of this document.' }) {
+  async analyzeDocument({
+    documentText,
+    fileName,
+    instruction = 'Please provide a comprehensive summary and key takeaways of this document.',
+    signal,
+    onModelSelected,
+  }) {
     const startHr = process.hrtime.bigint();
     const operation = 'document_analysis';
-    const model = this.modelName;
+    const { primaryModel, fallbackModel } = getAIModelConfig();
 
-    try {
-      const result = await executeWithTransientRetry(
-        async () => {
-          const ai = this.getClient();
+    const modelsToTry = [primaryModel];
+    if (fallbackModel && fallbackModel !== primaryModel) {
+      modelsToTry.push(fallbackModel);
+    }
 
-          // 1. Bound document text context
-          const maxContextChars = ENV.MAX_ANALYSIS_CONTEXT_CHARS || 50000;
-          const boundedText = documentText.length > maxContextChars
-            ? documentText.slice(0, maxContextChars) + '\n\n[... Remaining document content truncated for analysis context limit ...]'
-            : documentText;
+    let lastError = null;
 
-          // 2. Bound and sanitize user instruction
-          const maxInstructionChars = ENV.MAX_INSTRUCTION_CHARS || 1000;
-          const cleanInstruction = (instruction || 'Summarize this document').trim().slice(0, maxInstructionChars);
+    for (let modelIdx = 0; modelIdx < modelsToTry.length; modelIdx++) {
+      if (signal?.aborted) {
+        return { role: 'assistant', content: '', model: modelsToTry[modelIdx] };
+      }
 
-          // 3. Construct structured, prompt-injection isolated prompt
-          const userPrompt = `Document: "${fileName}"\n\nUser Instruction:\n${cleanInstruction}\n\n<DOCUMENT_CONTENT>\n${boundedText}\n</DOCUMENT_CONTENT>`;
+      const currentModel = modelsToTry[modelIdx];
+      const isFallback = modelIdx > 0;
 
-          const contents = [
-            {
-              role: 'user',
-              parts: [{ text: userPrompt }],
-            },
-          ];
+      if (typeof onModelSelected === 'function') {
+        onModelSelected(currentModel);
+      }
 
-          let timeoutHandle;
-          const timeoutPromise = new Promise((_, reject) => {
-            timeoutHandle = setTimeout(() => {
-              reject(new TimeoutError(`Document analysis timed out after ${ENV.DOCUMENT_ANALYSIS_TIMEOUT_MS / 1000} seconds.`));
-            }, ENV.DOCUMENT_ANALYSIS_TIMEOUT_MS);
-          });
+      const maxRetries = isFallback ? 0 : 2;
 
-          try {
-            const generatePromise = ai.models.generateContent({
-              model: this.modelName,
-              contents,
-              config: {
-                systemInstruction: 'You are an expert document analysis AI. Analyze the document objectively based strictly on the provided content.',
+      try {
+        const result = await executeWithTransientRetry(
+          async () => {
+            if (signal?.aborted) return null;
+            const ai = this.getClient();
+
+            // 1. Bound document text context
+            const maxContextChars = ENV.MAX_ANALYSIS_CONTEXT_CHARS || 50000;
+            const boundedText = documentText.length > maxContextChars
+              ? documentText.slice(0, maxContextChars) + '\n\n[... Remaining document content truncated for analysis context limit ...]'
+              : documentText;
+
+            // 2. Bound and sanitize user instruction
+            const maxInstructionChars = ENV.MAX_INSTRUCTION_CHARS || 1000;
+            const cleanInstruction = (instruction || 'Summarize this document').trim().slice(0, maxInstructionChars);
+
+            // 3. Construct structured, prompt-injection isolated prompt
+            const userPrompt = `Document: "${fileName}"\n\nUser Instruction:\n${cleanInstruction}\n\n<DOCUMENT_CONTENT>\n${boundedText}\n</DOCUMENT_CONTENT>`;
+
+            const contents = [
+              {
+                role: 'user',
+                parts: [{ text: userPrompt }],
               },
+            ];
+
+            let timeoutHandle;
+            const timeoutPromise = new Promise((_, reject) => {
+              timeoutHandle = setTimeout(() => {
+                reject(new TimeoutError(`Document analysis timed out after ${ENV.DOCUMENT_ANALYSIS_TIMEOUT_MS / 1000} seconds.`));
+              }, ENV.DOCUMENT_ANALYSIS_TIMEOUT_MS);
             });
 
-            const response = await Promise.race([generatePromise, timeoutPromise]);
-            clearTimeout(timeoutHandle);
+            try {
+              const generatePromise = ai.models.generateContent({
+                model: currentModel,
+                contents,
+                config: {
+                  systemInstruction: 'You are an expert document analysis AI. Analyze the document objectively based strictly on the provided content.',
+                },
+              });
 
-            const candidate = response?.candidates?.[0];
-            const text =
-              response?.text ||
-              candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n') ||
-              '';
+              const response = await Promise.race([generatePromise, timeoutPromise]);
+              clearTimeout(timeoutHandle);
 
-            if (!text) {
-              throw new AIProviderError(
-                'No analysis output was returned by the AI model.',
-                502,
-                'EMPTY_AI_RESPONSE'
-              );
-            }
+              if (signal?.aborted) return null;
 
-            return {
-              role: 'assistant',
-              content: text.trim(),
-              model: this.modelName,
-            };
-          } catch (error) {
-            clearTimeout(timeoutHandle);
+              const candidate = response?.candidates?.[0];
+              const text =
+                response?.text ||
+                candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n') ||
+                '';
 
-            if (error instanceof TimeoutError || error instanceof AIProviderError) {
+              if (!text) {
+                throw new AIProviderError(
+                  'No analysis output was returned by the AI model.',
+                  502,
+                  'EMPTY_AI_RESPONSE'
+                );
+              }
+
+              return {
+                role: 'assistant',
+                content: text.trim(),
+                model: currentModel,
+              };
+            } catch (error) {
+              clearTimeout(timeoutHandle);
               throw error;
             }
+          },
+          {
+            maxRetries,
+            baseDelayMs: 300,
+            maxDelayMs: 1500,
+            signal,
+            onRetry: () => recordAIRetryTelemetry({ operation, model: currentModel }),
+          }
+        );
 
-            const errorMessage = error.message || 'Unknown upstream AI error';
-            const sanitizedMsg = errorMessage.replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]');
-            if (ENV.NODE_ENV !== 'test') {
-              console.error('🔴 [GeminiService Document Analysis Error]:', sanitizedMsg);
-            }
+        if (signal?.aborted || !result) {
+          return { role: 'assistant', content: '', model: currentModel };
+        }
 
-            if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('invalid api key')) {
-              throw new AIProviderError(
-                'The configured Gemini API key is invalid. Please check your server environment configuration.',
-                502,
-                'INVALID_API_KEY'
-              );
-            }
+        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+        recordAITelemetry({ operation, model: currentModel, statusClass: '2xx', durationMs, isError: false });
+        return result;
+      } catch (error) {
+        lastError = error;
+        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+        const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
+        recordAITelemetry({ operation, model: currentModel, statusClass, durationMs, isError: true });
 
-            if (errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota')) {
-              throw new AIProviderError(
-                'Gemini API rate limit or quota exceeded. Please wait a moment and try again.',
-                429,
-                'RATE_LIMIT_EXCEEDED'
-              );
-            }
+        // If error is transient and fallback is available, log and attempt fallback
+        if (isTransientError(error) && modelIdx < modelsToTry.length - 1 && !signal?.aborted) {
+          const nextModel = modelsToTry[modelIdx + 1];
+          const rawReason = String(error.code || error.status || error.statusCode || error.message || 'transient_failure');
+          const sanitizedReason = rawReason
+            .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+            .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
+            .slice(0, 100);
 
-            throw new AIProviderError(
-              'Upstream AI service encountered an error while analyzing document.',
-              502,
-              'UPSTREAM_SERVICE_ERROR'
+          logger.warn('gemini.model.fallback', {
+            message: 'Primary model unavailable after retries.',
+            primary: currentModel,
+            fallback: nextModel,
+            reason: sanitizedReason,
+          });
+
+          if (ENV.NODE_ENV !== 'test') {
+            console.warn(
+              `[GeminiService Fallback]\nPrimary model unavailable after retries.\nprimary=${currentModel}\nfallback=${nextModel}\nreason=${sanitizedReason}`
             );
           }
-        },
-        {
-          onRetry: () => recordAIRetryTelemetry({ operation, model }),
+          continue;
         }
-      );
 
-      const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
-      recordAITelemetry({ operation, model, statusClass: '2xx', durationMs, isError: false });
-      return result;
-    } catch (error) {
-      const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
-      const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
-      recordAITelemetry({ operation, model, statusClass, durationMs, isError: true });
-      throw error;
+        throw normalizeAIError(error, 'document_analysis');
+      }
     }
+
+    throw normalizeAIError(lastError, 'document_analysis');
   }
 
   /**
    * Generates a progressive streaming response using Google Gemini generateContentStream.
+   * Handles transient errors with exponential backoff on primary model, and seamlessly switches to fallback model before any chunks are emitted.
    * @param {{
    *   messages: Array<{ role: string, content: string }>,
    *   systemInstruction?: string,
    *   onChunk: (text: string) => void,
+   *   onModelSelected?: (model: string) => void,
    *   signal?: AbortSignal,
    * }} params
-   * @returns {Promise<void>}
+   * @returns {Promise<{ model: string }>}
    */
   async streamResponse({
     messages,
     systemInstruction = NOVA_SYSTEM_INSTRUCTION,
     onChunk,
+    onModelSelected,
     signal,
   }) {
     const startHr = process.hrtime.bigint();
     const operation = 'chat_stream';
-    const model = this.modelName;
+    const { primaryModel, fallbackModel } = getAIModelConfig();
 
     const ai = this.getClient();
     const contents = this.formatMessages(messages);
 
-    const maxRetries = 2;
+    const modelsToTry = [primaryModel];
+    if (fallbackModel && fallbackModel !== primaryModel) {
+      modelsToTry.push(fallbackModel);
+    }
+
+    const maxPrimaryRetries = 2;
     const baseDelayMs = 500;
     const maxDelayMs = 2000;
-    let attempt = 0;
 
-    while (true) {
-      if (signal?.aborted) return;
+    let chunksEmitted = 0;
+    let selectedModel = primaryModel;
 
-      let timeoutHandle;
-      const timeoutPromise = new Promise((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          reject(new TimeoutError('Gemini API streaming timed out.'));
-        }, ENV.AI_STREAM_TIMEOUT_MS);
-      });
+    for (let modelIdx = 0; modelIdx < modelsToTry.length; modelIdx++) {
+      if (signal?.aborted) {
+        return { model: selectedModel };
+      }
 
-      let chunksEmitted = 0;
+      const currentModel = modelsToTry[modelIdx];
+      const isFallback = modelIdx > 0;
+      selectedModel = currentModel;
 
-      try {
-        const responseStreamPromise = ai.models.generateContentStream({
-          model: this.modelName,
-          contents,
-          config: {
-            systemInstruction,
-          },
+      if (typeof onModelSelected === 'function') {
+        onModelSelected(currentModel);
+      }
+
+      let attempt = 0;
+      const retriesForCurrentModel = isFallback ? 0 : maxPrimaryRetries;
+
+      while (true) {
+        if (signal?.aborted) {
+          return { model: currentModel };
+        }
+
+        let timeoutHandle;
+        const timeoutPromise = new Promise((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            reject(new TimeoutError('Gemini API streaming timed out.'));
+          }, ENV.AI_STREAM_TIMEOUT_MS);
         });
 
-        const responseStream = await Promise.race([
-          responseStreamPromise,
-          timeoutPromise,
-        ]);
+        try {
+          const responseStreamPromise = ai.models.generateContentStream({
+            model: currentModel,
+            contents,
+            config: {
+              systemInstruction,
+            },
+          });
 
-        for await (const chunk of responseStream) {
+          const responseStream = await Promise.race([
+            responseStreamPromise,
+            timeoutPromise,
+          ]);
+
+          for await (const chunk of responseStream) {
+            if (signal?.aborted) {
+              break;
+            }
+
+            const candidate = chunk?.candidates?.[0];
+            const text =
+              chunk?.text ||
+              candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('') ||
+              '';
+
+            if (text) {
+              chunksEmitted++;
+              onChunk(text);
+            }
+          }
+
+          clearTimeout(timeoutHandle);
+
+          if (!signal?.aborted) {
+            const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+            recordAITelemetry({ operation, model: currentModel, statusClass: '2xx', durationMs, isError: false });
+          }
+          return { model: currentModel };
+        } catch (error) {
+          clearTimeout(timeoutHandle);
+
           if (signal?.aborted) {
+            return { model: currentModel };
+          }
+
+          // CRITICAL SAFETY RULE A: If partial output reached the client, NEVER retry or fallback
+          if (chunksEmitted > 0) {
+            const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+            const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
+            recordAITelemetry({ operation, model: currentModel, statusClass, durationMs, isError: true });
+            throw normalizeAIError(error, 'streaming');
+          }
+
+          const isTransient = isTransientError(error);
+
+          // Retry primary model if transient and retries remain
+          if (isTransient && attempt < retriesForCurrentModel) {
+            attempt++;
+            recordAIRetryTelemetry({ operation, model: currentModel });
+            if (ENV.NODE_ENV !== 'test') {
+              console.warn(
+                `⚠️  [GeminiService Streaming Retry] Transient failure (${currentModel}, attempt ${attempt}/${retriesForCurrentModel}): ${error.message}. Retrying with backoff...`
+              );
+            }
+            const jitter = Math.random() * 50;
+            const delay = Math.min(baseDelayMs * Math.pow(2, attempt - 1) + jitter, maxDelayMs);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+
+          const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+          const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
+          recordAITelemetry({ operation, model: currentModel, statusClass, durationMs, isError: true });
+
+          // If transient and fallback model exists, log structured event and activate fallback
+          if (isTransient && modelIdx < modelsToTry.length - 1) {
+            const nextModel = modelsToTry[modelIdx + 1];
+            const rawReason = String(error.code || error.status || error.statusCode || (error.message ? error.message.slice(0, 100) : '503'));
+            const sanitizedReason = rawReason
+              .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+              .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
+              .slice(0, 100);
+
+            logger.warn('gemini.model.fallback', {
+              message: 'Primary model unavailable after retries.',
+              primary: currentModel,
+              fallback: nextModel,
+              reason: sanitizedReason,
+            });
+
+            if (ENV.NODE_ENV !== 'test') {
+              console.warn(
+                `[GeminiService Fallback]\nPrimary model unavailable after retries.\nprimary=${currentModel}\nfallback=${nextModel}\nreason=${sanitizedReason}`
+              );
+            }
+
+            // Break inner loop to move to fallback model in outer loop
             break;
           }
 
-          const candidate = chunk?.candidates?.[0];
-          const text =
-            chunk?.text ||
-            candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('') ||
-            '';
-
-          if (text) {
-            chunksEmitted++;
-            onChunk(text);
-          }
+          // Permanent error or fallback exhausted
+          throw normalizeAIError(error, 'streaming');
         }
-
-        clearTimeout(timeoutHandle);
-
-        if (!signal?.aborted) {
-          const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
-          recordAITelemetry({ operation, model, statusClass: '2xx', durationMs, isError: false });
-        }
-        return;
-      } catch (error) {
-        clearTimeout(timeoutHandle);
-
-        if (signal?.aborted) {
-          // Normal client cancellation, silently stop
-          return;
-        }
-
-        // Retry if no chunks were emitted to the client yet, error is transient, and attempts remain
-        if (chunksEmitted === 0 && isTransientError(error) && attempt < maxRetries) {
-          attempt++;
-          recordAIRetryTelemetry({ operation, model });
-          if (ENV.NODE_ENV !== 'test') {
-            console.warn(
-              `⚠️  [GeminiService Streaming Retry] Transient failure (attempt ${attempt}/${maxRetries}): ${error.message}. Retrying with backoff...`
-            );
-          }
-          const jitter = Math.random() * 50;
-          const delay = Math.min(baseDelayMs * Math.pow(2, attempt - 1) + jitter, maxDelayMs);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-
-        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
-        const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
-        recordAITelemetry({ operation, model, statusClass, durationMs, isError: true });
-
-        if (error instanceof TimeoutError || error instanceof AIProviderError) {
-          throw error;
-        }
-
-        const errorMessage = error.message || 'Unknown upstream streaming error';
-        const sanitizedMsg = errorMessage.replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]');
-        if (ENV.NODE_ENV !== 'test') {
-          console.error('🔴 [GeminiService Streaming Error]:', sanitizedMsg);
-        }
-
-        if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('invalid api key')) {
-          throw new AIProviderError(
-            'The configured Gemini API key is invalid. Please check your server environment configuration.',
-            502,
-            'INVALID_API_KEY'
-          );
-        }
-
-        if (errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota')) {
-          throw new AIProviderError(
-            'Gemini API rate limit or quota exceeded. Please wait a moment and try again.',
-            429,
-            'RATE_LIMIT_EXCEEDED'
-          );
-        }
-
-        throw new AIProviderError(
-          'Upstream AI service encountered an error while streaming response.',
-          502,
-          'UPSTREAM_SERVICE_ERROR'
-        );
       }
     }
+
+    return { model: selectedModel };
   }
 }
 
 export const geminiService = new GeminiService();
 export default geminiService;
-

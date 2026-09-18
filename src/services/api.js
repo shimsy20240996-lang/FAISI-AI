@@ -291,7 +291,7 @@ export async function searchConversations(query) {
  */
 export async function streamChatMessage(
   payload,
-  { onChunk, onSources, onComplete, onError },
+  { onChunk, onSources, onModel, onComplete, onError },
   signal
 ) {
   try {
@@ -359,6 +359,9 @@ export async function streamChatMessage(
             } else if (event.type === 'chunk' && event.text) {
               onChunk(event.text);
             } else if (event.type === 'done') {
+              if (event.model && typeof onModel === 'function') {
+                onModel(event.model);
+              }
               onComplete();
             } else if (event.type === 'error') {
               onError(new Error(event.message || 'Stream generation error.'));

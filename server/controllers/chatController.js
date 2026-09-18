@@ -12,6 +12,7 @@ import {
 import { isDatabaseConnected } from '../config/database.js';
 import { ENV } from '../config/env.js';
 import { recordSSEStreamStart, recordSSEStreamEnd } from '../utils/metrics.js';
+import { getAIModelConfig } from '../services/ai/geminiService.js';
 
 /**
  * Health check controller.
@@ -19,6 +20,7 @@ import { recordSSEStreamStart, recordSSEStreamEnd } from '../utils/metrics.js';
  */
 export async function getHealth(req, res) {
   const dbConnected = isDatabaseConnected();
+  const { primaryModel, fallbackModel } = getAIModelConfig();
 
   res.status(200).json({
     success: true,
@@ -26,7 +28,8 @@ export async function getHealth(req, res) {
     status: dbConnected ? 'online' : 'degraded',
     aiConfigured: Boolean(ENV.GEMINI_API_KEY && ENV.GEMINI_API_KEY.trim().length > 0),
     database: dbConnected ? 'connected' : 'disconnected',
-    model: ENV.GEMINI_MODEL,
+    model: primaryModel,
+    ...(fallbackModel ? { fallbackModel } : {}),
     version: '0.8.1',
   });
 }
@@ -312,11 +315,19 @@ export async function handleChatStream(req, res) {
     }
   });
 
+  const { primaryModel } = getAIModelConfig();
+  let activeModelUsed = primaryModel;
+
   try {
-    await aiService.streamResponse({
+    const streamResult = await aiService.streamResponse({
       messages: effectiveMessages,
       systemInstruction: effectiveSystemInstruction,
       signal: clientAbortController.signal,
+      onModelSelected: (model) => {
+        if (model) {
+          activeModelUsed = model;
+        }
+      },
       onChunk: (text) => {
         if (!res.writableEnded && !isUserAborted) {
           accumulatedText += text;
@@ -325,11 +336,15 @@ export async function handleChatStream(req, res) {
       },
     });
 
+    if (streamResult?.model) {
+      activeModelUsed = streamResult.model;
+    }
+
     if (!res.writableEnded && !isUserAborted) {
       isStreamCompleted = true;
       finalizeSSE('completed');
       await persistAssistantMessage(accumulatedText, 'complete');
-      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', model: activeModelUsed })}\n\n`);
     }
   } catch (error) {
     if (ENV.NODE_ENV !== 'test') {
@@ -342,13 +357,17 @@ export async function handleChatStream(req, res) {
         error.code === 'API_KEY_MISSING'
           ? 'Gemini API key is not configured on the server. Please set GEMINI_API_KEY in your server environment.'
           : error.code === 'INVALID_API_KEY'
-          ? 'The configured Gemini API key is invalid. Please check your server environment.'
+          ? 'SABU is temporarily unable to connect to its AI service.'
           : error.code === 'RATE_LIMIT_EXCEEDED'
-          ? 'Gemini API rate limit exceeded. Please wait a moment and try again.'
-          : 'Something went wrong while generating the response. Please try again.';
+          ? 'SABU is temporarily rate-limited. Please try again in a moment.'
+          : (error.code === 'MODEL_HIGH_DEMAND' || error.code === 'SERVICE_UNAVAILABLE' || error.statusCode === 503 || error.status === 503)
+          ? 'SABU is experiencing high demand right now. Please try again in a moment.'
+          : (error.isOperational && error.message && !error.message.includes('AIza') && !error.message.includes('key='))
+          ? error.message
+          : 'SABU couldn\'t reach the AI service right now. Please try again shortly.';
 
       res.write(
-        `data: ${JSON.stringify({ type: 'error', message: safeMessage })}\n\n`
+        `data: ${JSON.stringify({ type: 'error', message: safeMessage, code: error.code || 'UPSTREAM_SERVICE_ERROR' })}\n\n`
       );
     }
   } finally {

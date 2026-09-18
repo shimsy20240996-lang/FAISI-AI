@@ -295,7 +295,9 @@ export function Message({
             </span>
             {isAssistant && (
               <Badge variant="indigo" className="text-[10px] py-0 px-1.5">
-                Gemini 3.6 Flash
+                {message.model === 'gemini-3.5-flash-lite'
+                  ? 'Gemini 3.5 Flash-Lite'
+                  : (message.model === 'gemini-3.6-flash' ? 'Gemini 3.6 Flash' : (message.model || 'Gemini 3.6 Flash'))}
               </Badge>
             )}
             {attachments.length > 0 && (
@@ -428,6 +430,7 @@ function areMessagePropsEqual(prevProps, nextProps) {
   if (prevMsg.content !== nextMsg.content) return false;
   if (prevMsg.status !== nextMsg.status) return false;
   if (prevMsg.timestamp !== nextMsg.timestamp) return false;
+  if (prevMsg.model !== nextMsg.model) return false;
 
   // Citations / Sources check
   const prevSources = prevMsg.sources;
