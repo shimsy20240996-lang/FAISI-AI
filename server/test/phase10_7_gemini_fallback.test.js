@@ -13,7 +13,6 @@ import { logger } from '../utils/logger.js';
 
 describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () => {
   let capturedLogs = [];
-  let originalClient;
   let originalEnvFallback;
   let originalEnvModel;
 
@@ -123,7 +122,20 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(normalized.message.includes('AIza'), false);
     });
 
-    test('2.4 classifies generic upstream errors (500, 502, 504)', () => {
+    test('2.4 classifies timeout errors with user-friendly message (504 / TIMEOUT_ERROR)', () => {
+      const err = new TimeoutError('Gemini API streaming timed out.');
+      const normalized = normalizeAIError(err, 'test');
+      assert.strictEqual(normalized instanceof AIProviderError, true);
+      assert.strictEqual(normalized.statusCode, 504);
+      assert.strictEqual(normalized.code, 'TIMEOUT_ERROR');
+      assert.strictEqual(
+        normalized.message,
+        'SABU couldn\'t complete the response because the AI service took too long to respond. Please try again.'
+      );
+      assert.strictEqual(normalized.message.includes('streaming timed out'), false);
+    });
+
+    test('2.5 classifies generic upstream errors (500, 502)', () => {
       const err = new Error('Bad Gateway from upstream');
       err.status = 502;
       const normalized = normalizeAIError(err, 'test');
@@ -133,21 +145,25 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(normalized.message, 'SABU couldn\'t reach the AI service right now. Please try again shortly.');
     });
 
-    test('2.5 isTransientError correctly identifies all transient conditions', () => {
+    test('2.6 isTransientError correctly identifies all transient conditions including timeouts', () => {
       assert.strictEqual(isTransientError({ status: 429 }), true);
       assert.strictEqual(isTransientError({ statusCode: 500 }), true);
       assert.strictEqual(isTransientError({ status: 502 }), true);
       assert.strictEqual(isTransientError({ statusCode: 503 }), true);
       assert.strictEqual(isTransientError({ status: 504 }), true);
+      assert.strictEqual(isTransientError(new TimeoutError('streaming timed out')), true);
+      assert.strictEqual(isTransientError({ code: 'TIMEOUT_ERROR' }), true);
       assert.strictEqual(isTransientError({ code: 'ECONNRESET' }), true);
       assert.strictEqual(isTransientError({ code: 'ETIMEDOUT' }), true);
+      assert.strictEqual(isTransientError({ code: 'ESOCKETTIMEDOUT' }), true);
       assert.strictEqual(isTransientError({ code: 'EAI_AGAIN' }), true);
       assert.strictEqual(isTransientError(new Error('high demand spikes')), true);
       assert.strictEqual(isTransientError(new Error('service unavailable')), true);
       assert.strictEqual(isTransientError(new Error('temporarily unavailable')), true);
+      assert.strictEqual(isTransientError(new Error('Gemini API streaming timed out.')), true);
     });
 
-    test('2.6 isTransientError returns false for permanent errors (400, 401, 403, 404)', () => {
+    test('2.7 isTransientError returns false for permanent errors (400, 401, 403, 404)', () => {
       assert.strictEqual(isTransientError({ status: 400 }), false);
       assert.strictEqual(isTransientError({ statusCode: 401 }), false);
       assert.strictEqual(isTransientError({ status: 403 }), false);
@@ -230,7 +246,37 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(fallbackLog, undefined);
     });
 
-    test('3.3 Test 3 — Primary exhausted (503x3): fallback activates, succeeds, logs structured event', async () => {
+    test('3.3 Test 2b — Primary streaming timeout then succeeds on retry', async () => {
+      const calls = [];
+      let attempt = 0;
+
+      setupMockClient(async ({ model }) => {
+        calls.push(model);
+        attempt++;
+        if (attempt === 1) {
+          throw new TimeoutError('Gemini API streaming timed out.');
+        }
+        return (async function* () {
+          yield { text: 'Recovered after timeout' };
+        })();
+      });
+
+      const chunks = [];
+      const result = await geminiService.streamResponse({
+        messages: [{ role: 'user', content: 'Hi' }],
+        onChunk: (c) => chunks.push(c),
+      });
+
+      assert.strictEqual(chunks.join(''), 'Recovered after timeout');
+      assert.strictEqual(result.model, 'gemini-3.6-flash');
+      assert.strictEqual(calls.length, 2);
+
+      // Verify streaming timeout warning and retry warning
+      const timeoutLog = capturedLogs.find((l) => l.record?.event === 'gemini.stream.timeout');
+      assert.ok(timeoutLog, 'Should log gemini.stream.timeout');
+    });
+
+    test('3.4 Test 3 — Primary exhausted (503x3): fallback activates, succeeds, logs structured event', async () => {
       const calls = [];
 
       setupMockClient(async ({ model }) => {
@@ -267,7 +313,37 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(fallbackLog.record.fallback, 'gemini-3.5-flash-lite');
     });
 
-    test('3.4 Test 4 — Primary fails after partial output (chunksEmitted > 0): NEVER fallback or duplicate', async () => {
+    test('3.5 Test 3b — Primary streaming timeout repeatedly (3x): fallback activates, succeeds, logs structured timeout reason', async () => {
+      const calls = [];
+
+      setupMockClient(async ({ model }) => {
+        calls.push(model);
+        if (model === 'gemini-3.6-flash') {
+          throw new TimeoutError('Gemini API streaming timed out.');
+        }
+        return (async function* () {
+          yield { text: 'Fallback content after timeouts' };
+        })();
+      });
+
+      const chunks = [];
+      const result = await geminiService.streamResponse({
+        messages: [{ role: 'user', content: 'Hi' }],
+        onChunk: (c) => chunks.push(c),
+      });
+
+      assert.strictEqual(chunks.join(''), 'Fallback content after timeouts');
+      assert.strictEqual(result.model, 'gemini-3.5-flash-lite');
+      assert.strictEqual(calls.filter((m) => m === 'gemini-3.6-flash').length, 3);
+      assert.strictEqual(calls.filter((m) => m === 'gemini-3.5-flash-lite').length, 1);
+
+      // Verify structured fallback log with reason=timeout
+      const fallbackLog = capturedLogs.find((l) => l.record?.event === 'gemini.model.fallback');
+      assert.ok(fallbackLog, 'Should emit gemini.model.fallback structured log');
+      assert.strictEqual(fallbackLog.record.reason, 'timeout');
+    });
+
+    test('3.6 Test 4 — Primary fails after partial output (chunksEmitted > 0): NEVER fallback or duplicate', async () => {
       const calls = [];
 
       setupMockClient(async ({ model }) => {
@@ -305,7 +381,40 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(fallbackLog, undefined);
     });
 
-    test('3.5 Test 5 — Authentication failure (401): immediate failure, no retry storm, no fallback', async () => {
+    test('3.7 Test 4b — Primary timeout after partial output (chunksEmitted > 0): NEVER fallback or duplicate', async () => {
+      const calls = [];
+
+      setupMockClient(async ({ model }) => {
+        calls.push(model);
+        return (async function* () {
+          yield { text: 'Early chunk emitted ' };
+          throw new TimeoutError('Gemini API streaming timed out.');
+        })();
+      });
+
+      const chunks = [];
+      await assert.rejects(
+        async () => {
+          await geminiService.streamResponse({
+            messages: [{ role: 'user', content: 'Hi' }],
+            onChunk: (c) => chunks.push(c),
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.statusCode, 504);
+          assert.strictEqual(err.code, 'TIMEOUT_ERROR');
+          return true;
+        }
+      );
+
+      assert.strictEqual(chunks.join(''), 'Early chunk emitted ');
+      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(calls[0], 'gemini-3.6-flash');
+      const fallbackLog = capturedLogs.find((l) => l.record?.event === 'gemini.model.fallback');
+      assert.strictEqual(fallbackLog, undefined);
+    });
+
+    test('3.8 Test 5 — Authentication failure (401): immediate failure, no retry storm, no fallback', async () => {
       let callCount = 0;
 
       setupMockClient(async () => {
@@ -334,7 +443,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(callCount, 1);
     });
 
-    test('3.6 Test 6 — Rate limit (429): transient retry works, fallback only after retries exhaust', async () => {
+    test('3.9 Test 6 — Rate limit (429): transient retry works, fallback only after retries exhaust', async () => {
       const calls = [];
 
       setupMockClient(async ({ model }) => {
@@ -362,7 +471,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(calls.filter((m) => m === 'gemini-3.5-flash-lite').length, 1);
     });
 
-    test('3.7 Test 7 — Missing / Disabled fallback configuration: works normally, no fallback attempt on failure', async () => {
+    test('3.10 Test 7 — Missing / Disabled fallback configuration: works normally, no fallback attempt on failure', async () => {
       ENV.GEMINI_FALLBACK_MODEL = '';
       geminiService.updateModels();
 
@@ -395,7 +504,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(geminiService.fallbackModel, null);
     });
 
-    test('3.8 SAFEGUARD #1 — Cancellation: AbortSignal triggered during retry/delay stops execution cleanly', async () => {
+    test('3.11 SAFEGUARD #1 — Cancellation: AbortSignal triggered during retry/delay stops execution cleanly', async () => {
       const abortController = new AbortController();
       let primaryAttempts = 0;
 
@@ -425,7 +534,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(chunks.length, 0);
     });
 
-    test('3.9 SAFEGUARD #1 — Cancellation: Pre-aborted signal does not initialize request', async () => {
+    test('3.12 SAFEGUARD #1 — Cancellation: Pre-aborted signal does not initialize request', async () => {
       const abortController = new AbortController();
       abortController.abort();
 
@@ -448,7 +557,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(chunks.length, 0);
     });
 
-    test('3.10 SAFEGUARD #2 — Fallback Failure: Fallback attempted once, no second fallback or infinite loop', async () => {
+    test('3.13 SAFEGUARD #2 — Fallback Failure: Fallback attempted once, no second fallback or infinite loop on 503', async () => {
       const calls = [];
 
       setupMockClient(async ({ model }) => {
@@ -474,6 +583,42 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       );
 
       // Primary had 3 attempts (1 initial + 2 retries), fallback had exactly 1 attempt. Total = 4.
+      assert.strictEqual(calls.filter((m) => m === 'gemini-3.6-flash').length, 3);
+      assert.strictEqual(calls.filter((m) => m === 'gemini-3.5-flash-lite').length, 1);
+      assert.strictEqual(calls.length, 4);
+
+      const fallbackErrLog = capturedLogs.find((l) => l.record?.event === 'gemini.fallback.error');
+      assert.ok(fallbackErrLog, 'Should log gemini.fallback.error on fallback failure');
+    });
+
+    test('3.14 SAFEGUARD #2 — Fallback Failure: Fallback times out, final classified 504 TIMEOUT_ERROR thrown', async () => {
+      const calls = [];
+
+      setupMockClient(async ({ model }) => {
+        calls.push(model);
+        throw new TimeoutError('Gemini API streaming timed out.');
+      });
+
+      const chunks = [];
+      await assert.rejects(
+        async () => {
+          await geminiService.streamResponse({
+            messages: [{ role: 'user', content: 'Hi' }],
+            onChunk: (c) => chunks.push(c),
+          });
+        },
+        (err) => {
+          assert.strictEqual(err.statusCode, 504);
+          assert.strictEqual(err.code, 'TIMEOUT_ERROR');
+          assert.strictEqual(
+            err.message,
+            'SABU couldn\'t complete the response because the AI service took too long to respond. Please try again.'
+          );
+          return true;
+        }
+      );
+
+      // 3 on primary + 1 on fallback = 4 calls total
       assert.strictEqual(calls.filter((m) => m === 'gemini-3.6-flash').length, 3);
       assert.strictEqual(calls.filter((m) => m === 'gemini-3.5-flash-lite').length, 1);
       assert.strictEqual(calls.length, 4);
@@ -512,11 +657,35 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(calls.filter((m) => m === 'gemini-3.5-flash-lite').length, 1);
     });
 
-    test('4.2 analyzeDocument falls back to gemini-3.5-flash-lite when primary fails with 503', async () => {
+    test('4.2 generateResponse falls back to gemini-3.5-flash-lite when primary times out', async () => {
       const calls = [];
       geminiService.getClient = () => ({
         models: {
-          generateContent: async ({ model, contents }) => {
+          generateContent: async ({ model }) => {
+            calls.push(model);
+            if (model === 'gemini-3.6-flash') {
+              throw new TimeoutError('Gemini API timed out');
+            }
+            return {
+              text: 'Response from timeout fallback',
+            };
+          },
+        },
+      });
+
+      const res = await geminiService.generateResponse({
+        messages: [{ role: 'user', content: 'Hi' }],
+      });
+
+      assert.strictEqual(res.content, 'Response from timeout fallback');
+      assert.strictEqual(res.model, 'gemini-3.5-flash-lite');
+    });
+
+    test('4.3 analyzeDocument falls back to gemini-3.5-flash-lite when primary fails with 503', async () => {
+      const calls = [];
+      geminiService.getClient = () => ({
+        models: {
+          generateContent: async ({ model }) => {
             calls.push(model);
             if (model === 'gemini-3.6-flash') {
               const err = new Error('503 High Demand');
@@ -542,11 +711,11 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(calls.filter((m) => m === 'gemini-3.5-flash-lite').length, 1);
     });
 
-    test('4.3 aiService wrapper forwards onModelSelected and returns correct model', async () => {
+    test('4.4 aiService wrapper forwards onModelSelected and returns correct model', async () => {
       let reportedModel = null;
       geminiService.getClient = () => ({
         models: {
-          generateContentStream: async ({ model }) => {
+          generateContentStream: async () => {
             return (async function* () {
               yield { text: 'Wrapped stream chunk' };
             })();

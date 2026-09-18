@@ -27,21 +27,26 @@ export function getAIModelConfig(customEnv = ENV) {
 }
 
 /**
- * Checks whether an error is transient (e.g. rate limit, temporary network failure, 503 unavailable)
+ * Checks whether an error is transient (e.g. rate limit, temporary network failure, 503 unavailable, timeout)
  */
 export function isTransientError(error) {
   if (!error) return false;
+  if (error instanceof TimeoutError || error.name === 'TimeoutError' || error.code === 'TIMEOUT_ERROR') {
+    return true;
+  }
   const msg = (error.message || '').toLowerCase();
-  const code = Number(error.code || error.status || error.statusCode);
+  const rawCode = error.status || error.statusCode || error.code;
+  const numCode = Number(rawCode);
 
   if (
-    code === 429 ||
-    code === 500 ||
-    code === 502 ||
-    code === 503 ||
-    code === 504 ||
+    numCode === 429 ||
+    numCode === 500 ||
+    numCode === 502 ||
+    numCode === 503 ||
+    numCode === 504 ||
     error.code === 'ECONNRESET' ||
     error.code === 'ETIMEDOUT' ||
+    error.code === 'ESOCKETTIMEDOUT' ||
     error.code === 'EAI_AGAIN'
   ) {
     return true;
@@ -55,7 +60,10 @@ export function isTransientError(error) {
     msg.includes('high demand') ||
     msg.includes('econnreset') ||
     msg.includes('etimedout') ||
-    msg.includes('eai_again')
+    msg.includes('esockettimedout') ||
+    msg.includes('eai_again') ||
+    msg.includes('timed out') ||
+    msg.includes('timeout')
   ) {
     return true;
   }
@@ -69,8 +77,8 @@ export function isTransientError(error) {
  * @returns {AIProviderError|TimeoutError}
  */
 export function normalizeAIError(error, context = 'processing') {
-  if (error instanceof TimeoutError || error instanceof AIProviderError) {
-    return error;
+  if (!error) {
+    return new AIProviderError('Upstream AI service error.', 502, 'UPSTREAM_SERVICE_ERROR');
   }
 
   const errorMessage = error?.message || 'Unknown upstream AI error';
@@ -129,7 +137,23 @@ export function normalizeAIError(error, context = 'processing') {
     );
   }
 
-  // 4. Other Upstream Service Errors
+  // 4. Timeout (504 / TIMEOUT_ERROR / timed out)
+  if (
+    error instanceof TimeoutError ||
+    error.name === 'TimeoutError' ||
+    error.code === 'TIMEOUT_ERROR' ||
+    code === 504 ||
+    msg.includes('timed out') ||
+    msg.includes('timeout')
+  ) {
+    return new AIProviderError(
+      'SABU couldn\'t complete the response because the AI service took too long to respond. Please try again.',
+      504,
+      'TIMEOUT_ERROR'
+    );
+  }
+
+  // 5. Other Upstream Service Errors
   return new AIProviderError(
     'SABU couldn\'t reach the AI service right now. Please try again shortly.',
     code && code >= 400 && code < 600 ? code : 502,
@@ -372,14 +396,24 @@ class GeminiService {
         const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
         recordAITelemetry({ operation, model: currentModel, statusClass, durationMs, isError: true });
 
+        const isTimeout =
+          error instanceof TimeoutError ||
+          error.name === 'TimeoutError' ||
+          error.code === 'TIMEOUT_ERROR' ||
+          (error.message || '').toLowerCase().includes('timed out');
+
+        const rawReason = isTimeout
+          ? 'timeout'
+          : String(error.code || error.status || error.statusCode || (error.message ? error.message.slice(0, 100) : 'transient_failure'));
+
+        const sanitizedReason = rawReason
+          .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+          .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
+          .slice(0, 100);
+
         // If error is transient and fallback is available, log and attempt fallback
         if (isTransientError(error) && modelIdx < modelsToTry.length - 1 && !signal?.aborted) {
           const nextModel = modelsToTry[modelIdx + 1];
-          const rawReason = String(error.code || error.status || error.statusCode || error.message || 'transient_failure');
-          const sanitizedReason = rawReason
-            .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
-            .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
-            .slice(0, 100);
 
           logger.warn('gemini.model.fallback', {
             message: 'Primary model unavailable after retries.',
@@ -394,6 +428,18 @@ class GeminiService {
             );
           }
           continue;
+        }
+
+        if (isFallback) {
+          logger.warn('gemini.fallback.error', {
+            fallback: currentModel,
+            reason: sanitizedReason,
+          });
+          if (ENV.NODE_ENV !== 'test') {
+            console.warn(
+              `[GeminiService Fallback Error]\nfallback=${currentModel}\nreason=${sanitizedReason}`
+            );
+          }
         }
 
         throw normalizeAIError(error, 'chat');
@@ -539,14 +585,24 @@ class GeminiService {
         const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
         recordAITelemetry({ operation, model: currentModel, statusClass, durationMs, isError: true });
 
+        const isTimeout =
+          error instanceof TimeoutError ||
+          error.name === 'TimeoutError' ||
+          error.code === 'TIMEOUT_ERROR' ||
+          (error.message || '').toLowerCase().includes('timed out');
+
+        const rawReason = isTimeout
+          ? 'timeout'
+          : String(error.code || error.status || error.statusCode || (error.message ? error.message.slice(0, 100) : 'transient_failure'));
+
+        const sanitizedReason = rawReason
+          .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+          .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
+          .slice(0, 100);
+
         // If error is transient and fallback is available, log and attempt fallback
         if (isTransientError(error) && modelIdx < modelsToTry.length - 1 && !signal?.aborted) {
           const nextModel = modelsToTry[modelIdx + 1];
-          const rawReason = String(error.code || error.status || error.statusCode || error.message || 'transient_failure');
-          const sanitizedReason = rawReason
-            .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
-            .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
-            .slice(0, 100);
 
           logger.warn('gemini.model.fallback', {
             message: 'Primary model unavailable after retries.',
@@ -563,6 +619,18 @@ class GeminiService {
           continue;
         }
 
+        if (isFallback) {
+          logger.warn('gemini.fallback.error', {
+            fallback: currentModel,
+            reason: sanitizedReason,
+          });
+          if (ENV.NODE_ENV !== 'test') {
+            console.warn(
+              `[GeminiService Fallback Error]\nfallback=${currentModel}\nreason=${sanitizedReason}`
+            );
+          }
+        }
+
         throw normalizeAIError(error, 'document_analysis');
       }
     }
@@ -572,7 +640,8 @@ class GeminiService {
 
   /**
    * Generates a progressive streaming response using Google Gemini generateContentStream.
-   * Handles transient errors with exponential backoff on primary model, and seamlessly switches to fallback model before any chunks are emitted.
+   * Handles transient errors (including per-attempt timeouts) with exponential backoff on primary model,
+   * and seamlessly switches to fallback model before any chunks are emitted.
    * @param {{
    *   messages: Array<{ role: string, content: string }>,
    *   systemInstruction?: string,
@@ -630,8 +699,10 @@ class GeminiService {
         }
 
         let timeoutHandle;
+        let attemptTimedOut = false;
         const timeoutPromise = new Promise((_, reject) => {
           timeoutHandle = setTimeout(() => {
+            attemptTimedOut = true;
             reject(new TimeoutError('Gemini API streaming timed out.'));
           }, ENV.AI_STREAM_TIMEOUT_MS);
         });
@@ -645,27 +716,36 @@ class GeminiService {
             },
           });
 
+          // Race initial stream creation with the attempt-scoped timeout
           const responseStream = await Promise.race([
             responseStreamPromise,
             timeoutPromise,
           ]);
 
-          for await (const chunk of responseStream) {
-            if (signal?.aborted) {
-              break;
-            }
+          // Race chunk consumption with the attempt-scoped timeout
+          const consumeStreamPromise = (async () => {
+            for await (const chunk of responseStream) {
+              if (signal?.aborted || attemptTimedOut) {
+                break;
+              }
 
-            const candidate = chunk?.candidates?.[0];
-            const text =
-              chunk?.text ||
-              candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('') ||
-              '';
+              const candidate = chunk?.candidates?.[0];
+              const text =
+                chunk?.text ||
+                candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('') ||
+                '';
 
-            if (text) {
-              chunksEmitted++;
-              onChunk(text);
+              if (text) {
+                chunksEmitted++;
+                onChunk(text);
+              }
             }
-          }
+          })();
+
+          await Promise.race([
+            consumeStreamPromise,
+            timeoutPromise,
+          ]);
 
           clearTimeout(timeoutHandle);
 
@@ -679,6 +759,35 @@ class GeminiService {
 
           if (signal?.aborted) {
             return { model: currentModel };
+          }
+
+          const isTimeout =
+            error instanceof TimeoutError ||
+            error.name === 'TimeoutError' ||
+            error.code === 'TIMEOUT_ERROR' ||
+            (error.message || '').toLowerCase().includes('timed out') ||
+            (error.message || '').toLowerCase().includes('timeout');
+
+          const rawReason = isTimeout
+            ? 'timeout'
+            : String(error.code || error.status || error.statusCode || (error.message ? error.message.slice(0, 100) : 'transient_failure'));
+
+          const sanitizedReason = rawReason
+            .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+            .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
+            .slice(0, 100);
+
+          if (isTimeout) {
+            logger.warn('gemini.stream.timeout', {
+              model: currentModel,
+              attempt: attempt + 1,
+              chunksEmitted,
+            });
+            if (ENV.NODE_ENV !== 'test') {
+              console.warn(
+                `[GeminiService Streaming Timeout]\nmodel=${currentModel}\nattempt=${attempt + 1}\nchunksEmitted=${chunksEmitted}`
+              );
+            }
           }
 
           // CRITICAL SAFETY RULE A: If partial output reached the client, NEVER retry or fallback
@@ -697,7 +806,7 @@ class GeminiService {
             recordAIRetryTelemetry({ operation, model: currentModel });
             if (ENV.NODE_ENV !== 'test') {
               console.warn(
-                `⚠️  [GeminiService Streaming Retry] Transient failure (${currentModel}, attempt ${attempt}/${retriesForCurrentModel}): ${error.message}. Retrying with backoff...`
+                `[GeminiService Streaming Retry]\nmodel=${currentModel}\nattempt=${attempt}/${retriesForCurrentModel}\nreason=${sanitizedReason}`
               );
             }
             const jitter = Math.random() * 50;
@@ -713,11 +822,6 @@ class GeminiService {
           // If transient and fallback model exists, log structured event and activate fallback
           if (isTransient && modelIdx < modelsToTry.length - 1) {
             const nextModel = modelsToTry[modelIdx + 1];
-            const rawReason = String(error.code || error.status || error.statusCode || (error.message ? error.message.slice(0, 100) : '503'));
-            const sanitizedReason = rawReason
-              .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
-              .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
-              .slice(0, 100);
 
             logger.warn('gemini.model.fallback', {
               message: 'Primary model unavailable after retries.',
@@ -728,12 +832,25 @@ class GeminiService {
 
             if (ENV.NODE_ENV !== 'test') {
               console.warn(
-                `[GeminiService Fallback]\nPrimary model unavailable after retries.\nprimary=${currentModel}\nfallback=${nextModel}\nreason=${sanitizedReason}`
+                `[GeminiService Fallback]\nprimary=${currentModel}\nfallback=${nextModel}\nreason=${sanitizedReason}`
               );
             }
 
             // Break inner loop to move to fallback model in outer loop
             break;
+          }
+
+          // Fallback failure logging
+          if (isFallback) {
+            logger.warn('gemini.fallback.error', {
+              fallback: currentModel,
+              reason: sanitizedReason,
+            });
+            if (ENV.NODE_ENV !== 'test') {
+              console.warn(
+                `[GeminiService Fallback Error]\nfallback=${currentModel}\nreason=${sanitizedReason}`
+              );
+            }
           }
 
           // Permanent error or fallback exhausted

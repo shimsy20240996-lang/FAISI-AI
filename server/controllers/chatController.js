@@ -362,7 +362,9 @@ export async function handleChatStream(req, res) {
           ? 'SABU is temporarily rate-limited. Please try again in a moment.'
           : (error.code === 'MODEL_HIGH_DEMAND' || error.code === 'SERVICE_UNAVAILABLE' || error.statusCode === 503 || error.status === 503)
           ? 'SABU is experiencing high demand right now. Please try again in a moment.'
-          : (error.isOperational && error.message && !error.message.includes('AIza') && !error.message.includes('key='))
+          : (error.code === 'TIMEOUT_ERROR' || error.statusCode === 504 || error.status === 504 || error.message?.toLowerCase().includes('timed out') || error.message?.toLowerCase().includes('timeout'))
+          ? 'SABU couldn\'t complete the response because the AI service took too long to respond. Please try again.'
+          : (error.isOperational && error.message && !error.message.includes('AIza') && !error.message.includes('key=') && !error.message.includes('streaming timed out'))
           ? error.message
           : 'SABU couldn\'t reach the AI service right now. Please try again shortly.';
 
