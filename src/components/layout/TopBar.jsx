@@ -75,6 +75,14 @@ export function TopBar({
           </Badge>
           <ChevronDown className="w-3 h-3 text-neutral-400 ml-0.5" />
         </button>
+
+        {/* Active Conversation Title breadcrumb */}
+        {activeTitle && activeTitle !== 'SABU AI' && activeTitle !== 'New Exploration' && (
+          <div className="hidden md:flex items-center gap-2 pl-2 max-w-[200px] lg:max-w-[280px] truncate text-xs font-medium text-neutral-400 dark:text-neutral-400 light:text-neutral-600">
+            <span className="text-neutral-600 dark:text-neutral-600 light:text-neutral-400 select-none">/</span>
+            <span className="truncate">{activeTitle}</span>
+          </div>
+        )}
       </div>
 
       {/* Right Area: Auth Profile, Utility Actions & Theme Toggle */}

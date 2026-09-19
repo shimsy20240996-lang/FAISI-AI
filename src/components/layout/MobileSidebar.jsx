@@ -150,17 +150,28 @@ export function MobileSidebar({
                 return (
                   <div
                     key={item.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-selected={isActive}
+                    aria-label={`Select conversation: ${item.title}`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelectConversation(item.id);
+                        onClose();
+                      }
+                    }}
                     onClick={() => {
                       onSelectConversation(item.id);
                       onClose();
                     }}
-                    className={`flex items-center justify-between px-3 py-2.5 min-h-[44px] rounded-xl text-xs font-medium cursor-pointer transition-colors ${
+                    className={`flex items-center justify-between px-3 py-2.5 min-h-[44px] rounded-xl text-xs font-medium cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500/80 focus-visible:outline-none ${
                       isActive
                         ? 'bg-neutral-800/90 dark:bg-neutral-800/90 light:bg-neutral-200/90 text-neutral-100 dark:text-neutral-100 light:text-neutral-900 border border-neutral-700/60 dark:border-neutral-700/60 light:border-neutral-300'
                         : 'text-neutral-400 dark:text-neutral-400 light:text-neutral-600 hover:bg-neutral-800/50 dark:hover:bg-neutral-800/40 light:hover:bg-neutral-100 hover:text-neutral-200'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 truncate pr-1 flex-1">
+                    <div className="flex items-center gap-2.5 truncate pr-1 flex-1 pointer-events-none">
                       <MessageSquare className="w-4 h-4 shrink-0 opacity-70" />
                       <span className="truncate">{item.title}</span>
                     </div>

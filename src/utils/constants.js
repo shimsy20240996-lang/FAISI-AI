@@ -23,24 +23,8 @@ export const API_CONFIG = {
 export const INITIAL_CONVERSATIONS = [
   {
     id: 'conv-1',
-    title: 'Quantum Computing Principles',
+    title: 'New Exploration',
     group: 'Today',
-    messages: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'conv-2',
-    title: 'Python Data Structures Roadmap',
-    group: 'Yesterday',
-    messages: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'conv-3',
-    title: 'Sustainable Tech Startup Ideas',
-    group: 'Previous 7 Days',
     messages: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

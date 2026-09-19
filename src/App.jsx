@@ -12,6 +12,7 @@ const ClaimConversationsModal = React.lazy(() => import('./components/auth/Claim
 const DocumentHubModal = React.lazy(() => import('./components/documents/DocumentHubModal'));
 import {
   getConversations,
+  getConversation,
   createConversation,
   renameConversation,
   deleteConversation,
@@ -19,6 +20,38 @@ import {
   apiClaimConversations,
   apiGetUnclaimedCount,
 } from './services/api';
+
+const LOCAL_STORAGE_KEY_SABU = 'sabu_local_conversations';
+const LOCAL_STORAGE_KEY_NOVA = 'nova_local_conversations';
+
+function getStoredLocalConversations() {
+  try {
+    const stored =
+      localStorage.getItem(LOCAL_STORAGE_KEY_SABU) ||
+      localStorage.getItem(LOCAL_STORAGE_KEY_NOVA);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ Could not load local conversations from localStorage:', err.message);
+  }
+  return null;
+}
+
+function saveStoredLocalConversations(convs) {
+  try {
+    if (Array.isArray(convs) && convs.length > 0) {
+      const serialized = JSON.stringify(convs);
+      localStorage.setItem(LOCAL_STORAGE_KEY_SABU, serialized);
+      localStorage.setItem(LOCAL_STORAGE_KEY_NOVA, serialized);
+    }
+  } catch (err) {
+    console.warn('⚠️ Could not save local conversations to localStorage:', err.message);
+  }
+}
 
 function App() {
   const { user, isAuthenticated, isLoading: isAuthLoading } = useAuth();
@@ -122,10 +155,17 @@ function App() {
           }
         }
       } else {
-        // Unauthenticated guest exploring state (private user conversations are cleared immediately)
+        // Unauthenticated guest exploring state (loads local browser conversations or starter)
         if (isMounted) {
-          setConversations(INITIAL_CONVERSATIONS);
-          setActiveId('conv-1');
+          const storedLocal = getStoredLocalConversations();
+          if (storedLocal && storedLocal.length > 0) {
+            setConversations(storedLocal);
+            setActiveId(storedLocal[0].id);
+          } else {
+            setConversations(INITIAL_CONVERSATIONS);
+            setActiveId('conv-1');
+            saveStoredLocalConversations(INITIAL_CONVERSATIONS);
+          }
           setIsLoadingConversations(false);
           setClaimModalState({ isOpen: false, unclaimedCount: 0 });
         }
@@ -138,6 +178,13 @@ function App() {
       isMounted = false;
     };
   }, [isAuthenticated, isAuthLoading, user]);
+
+  // Persist local conversations to localStorage for unauthenticated guests
+  useEffect(() => {
+    if (!isAuthenticated && !isAuthLoading && Array.isArray(conversations) && conversations.length > 0) {
+      saveStoredLocalConversations(conversations);
+    }
+  }, [conversations, isAuthenticated, isAuthLoading]);
 
   // Active conversation object
   const activeConversation = conversations.find((c) => c.id === activeId) || null;
@@ -231,14 +278,38 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleNewChat]);
 
-  // Select Conversation
-  const handleSelectConversation = useCallback((id) => {
-    if (isGenerating) {
-      handleStopGeneration();
-    }
-    setActiveId(id);
-    setErrorMessage(null);
-  }, [isGenerating, handleStopGeneration]);
+  // Select Conversation & Restore Messages
+  const handleSelectConversation = useCallback(
+    async (id) => {
+      if (isGenerating) {
+        handleStopGeneration();
+      }
+      setActiveId(id);
+      setErrorMessage(null);
+
+      // If authenticated and selecting a persistent MongoDB conversation whose messages might not be cached
+      if (isAuthenticated && id && !id.startsWith('conv-')) {
+        const targetConv = conversations.find((c) => c.id === id);
+        if (!targetConv || !Array.isArray(targetConv.messages) || targetConv.messages.length === 0) {
+          try {
+            const fetched = await getConversation(id);
+            if (fetched && Array.isArray(fetched.messages) && fetched.messages.length > 0) {
+              setConversations((prev) =>
+                prev.map((c) =>
+                  c.id === id
+                    ? { ...c, messages: fetched.messages, title: fetched.title || c.title }
+                    : c
+                )
+              );
+            }
+          } catch (err) {
+            console.warn('⚠️ Could not fetch full conversation from server:', err.message);
+          }
+        }
+      }
+    },
+    [isGenerating, handleStopGeneration, isAuthenticated, conversations]
+  );
 
   // Open Rename Modal
   const handleOpenRename = useCallback((id, currentTitle) => {
