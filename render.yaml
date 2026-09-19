@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: faisi-ai
+    name: faisi-ai-assistant
     runtime: docker
     plan: free
     healthCheckPath: /api/health
