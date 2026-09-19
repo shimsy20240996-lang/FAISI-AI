@@ -107,24 +107,46 @@ export default function DocumentCard({
   };
 
   const getIndexingBadge = () => {
-    if (isIndexing || indexingStatus === 'indexing') {
+    if (indexingStatus === 'pending') {
       return (
-        <span className="flex items-center gap-1 text-[10px] font-medium text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded-md border border-cyan-500/30 animate-pulse">
-          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Indexing...
+        <span
+          className="flex items-center gap-1 text-[10px] font-medium text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded-md border border-cyan-500/30 animate-pulse"
+          title="Preparing document chunks and embeddings for Knowledge Base"
+        >
+          <RefreshCw className="w-2.5 h-2.5 animate-spin text-cyan-400" /> Preparing Knowledge Base...
+        </span>
+      );
+    }
+    if (isIndexing || indexingStatus === 'processing' || indexingStatus === 'indexing') {
+      return (
+        <span
+          className="flex items-center gap-1 text-[10px] font-medium text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded-md border border-cyan-500/30 animate-pulse"
+          title="Generating Gemini embeddings and storing vector chunks"
+        >
+          <RefreshCw className="w-2.5 h-2.5 animate-spin text-cyan-400" /> Indexing...
         </span>
       );
     }
     if (indexingStatus === 'indexed') {
       return (
-        <span className="flex items-center gap-1 text-[10px] font-medium text-indigo-300 bg-indigo-500/15 px-2 py-0.5 rounded-md border border-indigo-500/30" title={`${chunkCount} semantic vector chunks`}>
-          <Layers className="w-2.5 h-2.5 text-indigo-400" /> {chunkCount} Chunks
+        <span
+          className="flex items-center gap-1 text-[10px] font-medium text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30"
+          title={`✓ Ready for Knowledge Base (${chunkCount || 0} semantic vector chunks)`}
+        >
+          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+          <span className="hidden sm:inline">✓ Ready for Knowledge Base</span>
+          <span className="sm:hidden">✓ Ready</span>
+          {chunkCount > 0 && <span className="text-[9px] opacity-75">({chunkCount})</span>}
         </span>
       );
     }
     if (indexingStatus === 'failed') {
       return (
-        <span className="flex items-center gap-1 text-[10px] font-medium text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
-          <AlertCircle className="w-2.5 h-2.5" /> Unindexed
+        <span
+          className="flex items-center gap-1 text-[10px] font-medium text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20"
+          title={document.indexingError || 'Indexing failed. Click Retry to re-index.'}
+        >
+          <AlertCircle className="w-2.5 h-2.5" /> Indexing failed
         </span>
       );
     }
@@ -200,16 +222,34 @@ export default function DocumentCard({
           <button
             type="button"
             onClick={() => onIndex(document)}
-            disabled={isIndexing || indexingStatus === 'indexing'}
-            className={`flex items-center justify-center p-2 rounded-xl text-xs font-medium border transition-all ${
-              indexingStatus === 'indexed'
+            disabled={isIndexing || indexingStatus === 'pending' || indexingStatus === 'processing' || indexingStatus === 'indexing'}
+            className={`flex items-center justify-center gap-1 px-2.5 py-2 rounded-xl text-xs font-medium border transition-all ${
+              indexingStatus === 'failed'
+                ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/30'
+                : indexingStatus === 'indexed'
                 ? 'bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
                 : 'bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
             }`}
-            title={indexingStatus === 'indexed' ? 'Re-index vectors for RAG' : 'Index vectors for RAG'}
+            title={
+              indexingStatus === 'failed'
+                ? 'Retry indexing into Knowledge Base'
+                : indexingStatus === 'indexed'
+                ? 'Re-index vectors for RAG'
+                : 'Index into Knowledge Base'
+            }
           >
-            {isIndexing || indexingStatus === 'indexing' ? (
+            {isIndexing || indexingStatus === 'pending' || indexingStatus === 'processing' || indexingStatus === 'indexing' ? (
               <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+            ) : indexingStatus === 'failed' ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Retry</span>
+              </>
+            ) : indexingStatus === 'unindexed' ? (
+              <>
+                <Database className="w-3.5 h-3.5" />
+                <span>Index</span>
+              </>
             ) : (
               <Database className="w-4 h-4" />
             )}

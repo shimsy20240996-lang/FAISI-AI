@@ -21,9 +21,12 @@ export class DocumentController {
         });
       }
 
+      const autoIndex = req.body?.autoIndex !== false && req.body?.autoIndex !== 'false';
+
       const result = await documentService.processUpload({
         userId: req.user.id,
         file: req.file,
+        autoIndex,
       });
 
       recordDocumentUpload({ status: 'accepted' });

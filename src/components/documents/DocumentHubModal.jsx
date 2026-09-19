@@ -44,8 +44,8 @@ export default function DocumentHubModal({ isOpen, onClose, user }) {
   const [analyzeDoc, setAnalyzeDoc] = useState(null);
   const [deleteDoc, setDeleteDoc] = useState(null);
 
-  const fetchDocumentsAndStats = async () => {
-    setIsLoading(true);
+  const fetchDocumentsAndStats = async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
     setError('');
 
     try {
@@ -58,15 +58,35 @@ export default function DocumentHubModal({ isOpen, onClose, user }) {
     } catch (err) {
       setError(err.message || 'Failed to load documents');
     } finally {
-      setIsLoading(false);
+      if (showLoading) setIsLoading(false);
     }
   };
 
   useEffect(() => {
     if (isOpen) {
-      fetchDocumentsAndStats();
+      fetchDocumentsAndStats(true);
     }
   }, [isOpen]);
+
+  // Dynamic lightweight polling when any document is actively extracting or indexing
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const hasPendingWork = documents.some(
+      (d) =>
+        d.indexingStatus === 'pending' ||
+        d.indexingStatus === 'processing' ||
+        d.status === 'processing'
+    );
+
+    if (!hasPendingWork) return;
+
+    const pollInterval = setInterval(() => {
+      fetchDocumentsAndStats(false);
+    }, 2000);
+
+    return () => clearInterval(pollInterval);
+  }, [isOpen, documents]);
 
   // Escape key & body scroll lock handling
   useEffect(() => {

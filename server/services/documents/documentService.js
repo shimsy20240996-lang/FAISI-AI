@@ -5,6 +5,7 @@ import { User } from '../../models/User.js';
 import { storageService } from '../storage/storageService.js';
 import { validateUploadedFile } from './fileValidationService.js';
 import { extractionService } from './extractionService.js';
+import { ragService } from '../rag/ragService.js';
 import { ENV } from '../../config/env.js';
 import { recordDocumentProcessing } from '../../utils/metrics.js';
 
@@ -171,9 +172,10 @@ export class DocumentService {
   }
 
   /**
-   * Uploads, validates, stores, and extracts a document for the user with atomic quota reservation & rollback.
+   * Uploads, validates, stores, and extracts a document for the user with atomic quota reservation & rollback,
+   * and automatically initiates asynchronous background indexing for Knowledge Base readiness.
    */
-  async processUpload({ userId, file }) {
+  async processUpload({ userId, file, autoIndex = true }) {
     if (!file || !file.buffer) {
       throw new Error('No document file was provided in the request');
     }
@@ -267,7 +269,24 @@ export class DocumentService {
       if (extractionResult.pageCount) {
         doc.pageCount = extractionResult.pageCount;
       }
+
+      const hasExtractableText = Boolean(doc.extractedText && doc.extractedText.trim().length > 0);
+      if (autoIndex && hasExtractableText) {
+        doc.indexingStatus = 'pending';
+      }
+
       await doc.save();
+
+      // Step 8: Trigger background auto-indexing asynchronously without blocking the upload HTTP response
+      if (autoIndex && hasExtractableText) {
+        setImmediate(async () => {
+          try {
+            await ragService.indexDocument(userObjectId, doc._id.toString());
+          } catch (indexErr) {
+            console.error(`🔴 [Auto-Indexing Background Error for Doc ${doc._id}]:`, indexErr.message);
+          }
+        });
+      }
     } catch (extErr) {
       // Extraction failed: update status to 'failed' rather than leaving in 'processing'
       const durationMs = Number(process.hrtime.bigint() - extractStart) / 1e6;
