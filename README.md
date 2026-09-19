@@ -443,7 +443,7 @@ docker run -d \
   -v faisi_storage:/app/storage \
   -e NODE_ENV=production \
   -e PORT=5000 \
-  -e CLIENT_URL=https://sabu-ai.onrender.com \
+  -e CLIENT_URL=https://faisi-ai.onrender.com \
   -e MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/nova_ai \
   -e MONGODB_DB_NAME=nova_ai \
   -e AUTH_SECRET=your_crypto_random_secret_here \
