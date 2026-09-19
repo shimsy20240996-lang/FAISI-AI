@@ -293,13 +293,7 @@ export function Message({
             <span className="text-[10px] text-neutral-500 dark:text-neutral-500 light:text-neutral-400">
               {message.timestamp}
             </span>
-            {isAssistant && (
-              <Badge variant="indigo" className="text-[10px] py-0 px-1.5">
-                {message.model === 'gemini-3.5-flash-lite'
-                  ? 'Gemini 3.5 Flash-Lite'
-                  : (message.model === 'gemini-3.6-flash' ? 'Gemini 3.6 Flash' : (message.model || 'Gemini 3.6 Flash'))}
-              </Badge>
-            )}
+
             {attachments.length > 0 && (
               <Badge variant="secondary" className="text-[10px] py-0 px-1.5 border-purple-500/30 text-purple-300">
                 <ImageIcon className="w-2.5 h-2.5 mr-1 inline" />
