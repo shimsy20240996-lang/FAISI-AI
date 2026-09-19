@@ -102,6 +102,7 @@ function App() {
   const [useKnowledgeBase, setUseKnowledgeBase] = useState(false);
   const [userDocuments, setUserDocuments] = useState([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
+  const [composerPrefill, setComposerPrefill] = useState('');
 
   const activeAbortControllerRef = useRef(null);
   const lastFailedActionRef = useRef(null);
@@ -866,6 +867,31 @@ function App() {
     }
   }, [isAuthenticated]);
 
+  // Ask FAISI about search result passage (Phase 3)
+  const handleAskFaisi = useCallback((source) => {
+    if (!source) return;
+
+    // 1. Close Document Hub
+    setIsDocumentHubOpen(false);
+
+    // 2. Ensure Knowledge Base is enabled
+    setUseKnowledgeBase(true);
+
+    // 3. Select the source document ID
+    if (source.documentId) {
+      setSelectedDocumentIds([source.documentId]);
+    }
+
+    // 4. Construct a concise contextual prompt and set composer prefill
+    const docName = source.documentName || 'this document';
+    const cleanSnippet = source.snippet ? source.snippet.trim().slice(0, 150) : '';
+    const promptText = cleanSnippet
+      ? `Can you explain this excerpt from "${docName}": "${cleanSnippet}"?`
+      : `Can you summarize the key findings in "${docName}"?`;
+
+    setComposerPrefill(promptText);
+  }, []);
+
   return (
     <>
       <MainLayout
@@ -901,6 +927,8 @@ function App() {
           onClearDocumentSelection={handleClearDocumentSelection}
           onRefreshDocuments={refreshUserDocuments}
           onNotice={handleNotice}
+          composerPrefill={composerPrefill}
+          onClearComposerPrefill={() => setComposerPrefill('')}
         />
       </MainLayout>
 
@@ -912,6 +940,7 @@ function App() {
             isOpen={isDocumentHubOpen}
             onClose={handleCloseDocuments}
             user={user}
+            onAskFaisi={handleAskFaisi}
           />
         )}
 

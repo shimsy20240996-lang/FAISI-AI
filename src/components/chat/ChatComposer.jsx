@@ -56,6 +56,8 @@ export function ChatComposer({
   onClearDocumentSelection,
   onRefreshDocuments,
   onNotice,
+  composerPrefill = '',
+  onClearComposerPrefill,
 }) {
   const [input, setInput] = useState('');
   const [pendingImages, setPendingImages] = useState([]);
@@ -67,6 +69,19 @@ export function ChatComposer({
   const textareaRef = useAutoResize(input, 160);
   const fileInputRef = useRef(null);
   const selectorRef = useRef(null);
+
+  // Handle external prefill from "Ask FAISI" (Phase 3)
+  useEffect(() => {
+    if (composerPrefill && composerPrefill.trim()) {
+      setInput(composerPrefill.trim());
+      if (onClearComposerPrefill) {
+        onClearComposerPrefill();
+      }
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 50);
+    }
+  }, [composerPrefill, onClearComposerPrefill]);
 
   // Voice recording hook
   const handleRecordComplete = async (audioBlob) => {

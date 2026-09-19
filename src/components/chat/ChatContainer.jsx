@@ -47,6 +47,8 @@ export function ChatContainer({
   onClearDocumentSelection,
   onRefreshDocuments,
   onNotice,
+  composerPrefill = '',
+  onClearComposerPrefill,
 }) {
   const messages = conversation?.messages || [];
   const isEmpty = messages.length === 0;
@@ -121,6 +123,8 @@ export function ChatContainer({
         onClearDocumentSelection={onClearDocumentSelection}
         onRefreshDocuments={onRefreshDocuments}
         onNotice={onNotice}
+        composerPrefill={composerPrefill}
+        onClearComposerPrefill={onClearComposerPrefill}
       />
     </div>
   );
