@@ -24,7 +24,7 @@ export async function getHealth(req, res) {
 
   res.status(200).json({
     success: true,
-    service: 'SABU AI API',
+    service: 'FAISI AI API',
     status: dbConnected ? 'online' : 'degraded',
     aiConfigured: Boolean(ENV.GEMINI_API_KEY && ENV.GEMINI_API_KEY.trim().length > 0),
     database: dbConnected ? 'connected' : 'disconnected',
@@ -357,16 +357,16 @@ export async function handleChatStream(req, res) {
         error.code === 'API_KEY_MISSING'
           ? 'Gemini API key is not configured on the server. Please set GEMINI_API_KEY in your server environment.'
           : error.code === 'INVALID_API_KEY'
-          ? 'SABU is temporarily unable to connect to its AI service.'
+          ? 'FAISI is temporarily unable to connect to its AI service.'
           : error.code === 'RATE_LIMIT_EXCEEDED'
-          ? 'SABU is temporarily rate-limited. Please try again in a moment.'
+          ? 'FAISI is temporarily rate-limited. Please try again in a moment.'
           : (error.code === 'MODEL_HIGH_DEMAND' || error.code === 'SERVICE_UNAVAILABLE' || error.statusCode === 503 || error.status === 503)
-          ? 'SABU is experiencing high demand right now. Please try again in a moment.'
+          ? 'FAISI is experiencing high demand right now. Please try again in a moment.'
           : (error.code === 'TIMEOUT_ERROR' || error.statusCode === 504 || error.status === 504 || error.message?.toLowerCase().includes('timed out') || error.message?.toLowerCase().includes('timeout'))
-          ? 'SABU couldn\'t complete the response because the AI service took too long to respond. Please try again.'
+          ? 'FAISI couldn\'t complete the response because the AI service took too long to respond. Please try again.'
           : (error.isOperational && error.message && !error.message.includes('AIza') && !error.message.includes('key=') && !error.message.includes('streaming timed out'))
           ? error.message
-          : 'SABU couldn\'t reach the AI service right now. Please try again shortly.';
+          : 'FAISI couldn\'t reach the AI service right now. Please try again shortly.';
 
       res.write(
         `data: ${JSON.stringify({ type: 'error', message: safeMessage, code: error.code || 'UPSTREAM_SERVICE_ERROR' })}\n\n`

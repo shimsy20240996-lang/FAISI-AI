@@ -25,10 +25,20 @@ export function HelpModal({ isOpen, onClose }) {
       isOpen={isOpen}
       onClose={onClose}
       title="Help & Project Roadmap"
-      description="Keyboard shortcuts and development timeline for SABU AI"
+      description="Keyboard shortcuts and development timeline for FAISI AI"
       maxWidth="lg"
     >
       <div className="space-y-6 pt-2">
+        {/* Brand & Dedication */}
+        <div className="p-3.5 rounded-xl bg-gradient-to-r from-indigo-950/40 to-purple-950/40 border border-indigo-500/20 text-center space-y-1">
+          <div className="text-xs font-bold text-neutral-200 dark:text-neutral-200 light:text-neutral-800">
+            FAISI AI &bull; Your AI. Your Way.
+          </div>
+          <div className="text-[11px] text-neutral-400 dark:text-neutral-400 light:text-neutral-600">
+            Inspired by Failul Rahman &amp; Sithy Siyama.
+          </div>
+        </div>
+
         {/* Keyboard Shortcuts */}
         <div>
           <div className="flex items-center gap-2 mb-3">

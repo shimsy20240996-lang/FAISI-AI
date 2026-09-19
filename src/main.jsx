@@ -6,7 +6,10 @@ import './index.css';
 
 // Synchronously initialize theme on document element before React mounts
 try {
-  const savedTheme = localStorage.getItem('sabu_theme') || localStorage.getItem('nova_theme');
+  const savedTheme =
+    localStorage.getItem('faisi_theme') ||
+    localStorage.getItem('sabu_theme') ||
+    localStorage.getItem('nova_theme');
   const initialTheme =
     savedTheme === 'light' || savedTheme === 'dark'
       ? savedTheme

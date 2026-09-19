@@ -216,7 +216,7 @@ const server = app.listen(ENV.PORT, '0.0.0.0', () => {
     environment: ENV.NODE_ENV,
   });
   if (ENV.NODE_ENV !== 'test') {
-    console.log(`🚀 [SABU AI Server] Running on http://0.0.0.0:${ENV.PORT}`);
+    console.log(`🚀 [FAISI AI Server] Running on http://0.0.0.0:${ENV.PORT}`);
     console.log(`   Model: ${ENV.GEMINI_MODEL}`);
     console.log(`   Client URL: ${ENV.CLIENT_URL}`);
   }

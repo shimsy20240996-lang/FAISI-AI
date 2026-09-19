@@ -1,5 +1,5 @@
 # =============================================================================
-# SABU AI — Production Multi-Stage Dockerfile
+# FAISI AI — Production Multi-Stage Dockerfile
 # Optimized for minimal image size, zero secrets in layers, and non-root runtime
 # =============================================================================
 
@@ -59,5 +59,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://localhost:' + (process.env.PORT || 5000) + '/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
-# Start SABU AI production server
+# Start FAISI AI production server
 CMD ["node", "server/server.js"]

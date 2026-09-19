@@ -252,10 +252,10 @@ export function ChatComposer({
               isGenerating
                 ? pendingImages.length > 0
                   ? 'Draft question about attached image(s)...'
-                  : 'Draft your next prompt while SABU responds...'
+                  : 'Draft your next prompt while FAISI responds...'
                 : pendingImages.length > 0
                 ? 'Ask about the attached image(s)...'
-                : 'Ask SABU anything...'
+                : 'Ask FAISI anything...'
             }
             rows={1}
             aria-label="Message input"
@@ -353,7 +353,7 @@ export function ChatComposer({
 
       {/* Screen Reader & Accessibility Note */}
       <div className="mt-2 text-center text-[11px] text-neutral-500 dark:text-neutral-500 light:text-neutral-400">
-        SABU AI &bull; Gemini 3.6 Flash Multimodal &bull; Speech & Knowledge Base Engine
+        FAISI AI &bull; Your AI. Your Way.
       </div>
     </div>
   );

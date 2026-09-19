@@ -37,7 +37,7 @@ export function ModelSelectorModal({ isOpen, onClose }) {
       isOpen={isOpen}
       onClose={onClose}
       title="Active AI Model & Providers"
-      description="SABU AI multi-model architecture configuration"
+      description="FAISI AI multi-model architecture configuration"
       maxWidth="md"
     >
       <div className="space-y-4 pt-2">

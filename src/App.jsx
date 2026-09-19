@@ -21,12 +21,14 @@ import {
   apiGetUnclaimedCount,
 } from './services/api';
 
+const LOCAL_STORAGE_KEY_FAISI = 'faisi_local_conversations';
 const LOCAL_STORAGE_KEY_SABU = 'sabu_local_conversations';
 const LOCAL_STORAGE_KEY_NOVA = 'nova_local_conversations';
 
 function getStoredLocalConversations() {
   try {
     const stored =
+      localStorage.getItem(LOCAL_STORAGE_KEY_FAISI) ||
       localStorage.getItem(LOCAL_STORAGE_KEY_SABU) ||
       localStorage.getItem(LOCAL_STORAGE_KEY_NOVA);
     if (stored) {
@@ -45,6 +47,7 @@ function saveStoredLocalConversations(convs) {
   try {
     if (Array.isArray(convs) && convs.length > 0) {
       const serialized = JSON.stringify(convs);
+      localStorage.setItem(LOCAL_STORAGE_KEY_FAISI, serialized);
       localStorage.setItem(LOCAL_STORAGE_KEY_SABU, serialized);
       localStorage.setItem(LOCAL_STORAGE_KEY_NOVA, serialized);
     }
@@ -807,7 +810,7 @@ function App() {
       <MainLayout
         conversations={conversations}
         activeId={activeId}
-        activeTitle={activeConversation?.title || 'SABU AI'}
+        activeTitle={activeConversation?.title || 'FAISI AI'}
         isLoadingConversations={isLoadingConversations}
         onSelectConversation={handleSelectConversation}
         onNewChat={handleNewChat}

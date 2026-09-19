@@ -2,7 +2,7 @@ import { ENV } from '../config/env.js';
 
 /**
  * Generates Content-Security-Policy directives for Helmet.
- * Deny-by-default, strictly allowing only what SABU AI actually requires.
+ * Deny-by-default, strictly allowing only what FAISI AI actually requires.
  *
  * @param {object} [customEnv=ENV] - Environment configuration override for testing
  * @returns {object} Helmet CSP directives object

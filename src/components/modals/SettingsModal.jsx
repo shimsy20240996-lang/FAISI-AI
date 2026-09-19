@@ -16,7 +16,7 @@ export function SettingsModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Settings & Preferences"
-      description="Customize your SABU AI workspace experience"
+      description="Customize your FAISI AI workspace experience"
       maxWidth="md"
     >
       <div className="space-y-6 pt-2">

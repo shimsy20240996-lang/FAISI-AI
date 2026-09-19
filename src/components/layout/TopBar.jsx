@@ -61,7 +61,7 @@ export function TopBar({
         </div>
 
         {/* Active Conversation Title */}
-        {activeTitle && activeTitle !== 'SABU AI' && activeTitle !== 'New Exploration' && (
+        {activeTitle && activeTitle !== 'FAISI AI' && activeTitle !== 'SABU AI' && activeTitle !== 'New Exploration' && (
           <div className="flex items-center pl-1 max-w-[200px] sm:max-w-[320px] lg:max-w-[420px] truncate text-xs font-semibold text-neutral-300 dark:text-neutral-300 light:text-neutral-700">
             <span className="truncate">{activeTitle}</span>
           </div>

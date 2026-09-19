@@ -98,7 +98,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(normalized instanceof AIProviderError, true);
       assert.strictEqual(normalized.statusCode, 429);
       assert.strictEqual(normalized.code, 'RATE_LIMIT_EXCEEDED');
-      assert.strictEqual(normalized.message, 'SABU is temporarily rate-limited. Please try again in a moment.');
+      assert.strictEqual(normalized.message, 'FAISI is temporarily rate-limited. Please try again in a moment.');
     });
 
     test('2.2 classifies 503 and high demand errors with model availability message', () => {
@@ -108,7 +108,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(normalized instanceof AIProviderError, true);
       assert.strictEqual(normalized.statusCode, 503);
       assert.strictEqual(normalized.code, 'MODEL_HIGH_DEMAND');
-      assert.strictEqual(normalized.message, 'SABU is experiencing high demand right now. Please try again in a moment.');
+      assert.strictEqual(normalized.message, 'FAISI is experiencing high demand right now. Please try again in a moment.');
     });
 
     test('2.3 classifies 401 and invalid API key errors without leaking key or config details', () => {
@@ -118,7 +118,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(normalized instanceof AIProviderError, true);
       assert.strictEqual(normalized.statusCode, 401);
       assert.strictEqual(normalized.code, 'INVALID_API_KEY');
-      assert.strictEqual(normalized.message, 'SABU is temporarily unable to connect to its AI service.');
+      assert.strictEqual(normalized.message, 'FAISI is temporarily unable to connect to its AI service.');
       assert.strictEqual(normalized.message.includes('AIza'), false);
     });
 
@@ -130,7 +130,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(normalized.code, 'TIMEOUT_ERROR');
       assert.strictEqual(
         normalized.message,
-        'SABU couldn\'t complete the response because the AI service took too long to respond. Please try again.'
+        'FAISI couldn\'t complete the response because the AI service took too long to respond. Please try again.'
       );
       assert.strictEqual(normalized.message.includes('streaming timed out'), false);
     });
@@ -142,7 +142,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
       assert.strictEqual(normalized instanceof AIProviderError, true);
       assert.strictEqual(normalized.statusCode, 502);
       assert.strictEqual(normalized.code, 'UPSTREAM_SERVICE_ERROR');
-      assert.strictEqual(normalized.message, 'SABU couldn\'t reach the AI service right now. Please try again shortly.');
+      assert.strictEqual(normalized.message, 'FAISI couldn\'t reach the AI service right now. Please try again shortly.');
     });
 
     test('2.6 isTransientError correctly identifies all transient conditions including timeouts', () => {
@@ -612,7 +612,7 @@ describe('Phase 10.7: Production Gemini Resilience & Model Fallback Suite', () =
           assert.strictEqual(err.code, 'TIMEOUT_ERROR');
           assert.strictEqual(
             err.message,
-            'SABU couldn\'t complete the response because the AI service took too long to respond. Please try again.'
+            'FAISI couldn\'t complete the response because the AI service took too long to respond. Please try again.'
           );
           return true;
         }

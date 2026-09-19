@@ -25,7 +25,7 @@ export function WelcomeScreen({ onSelectSuggestion }) {
         transition={{ duration: 0.4, ease: 'easeOut' }}
         className="flex flex-col items-center mb-8"
       >
-        {/* SABU Spark Mark */}
+        {/* FAISI Spark Mark */}
         <div className="relative mb-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 p-0.5 shadow-xl shadow-indigo-500/20 flex items-center justify-center">
             <div className="w-full h-full bg-neutral-950 dark:bg-neutral-950 light:bg-white rounded-[14px] flex items-center justify-center">
@@ -36,12 +36,12 @@ export function WelcomeScreen({ onSelectSuggestion }) {
 
         {/* Headline */}
         <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-neutral-100 via-neutral-200 to-neutral-400 dark:from-neutral-100 dark:via-neutral-200 dark:to-neutral-400 light:from-neutral-900 light:via-neutral-800 light:to-neutral-600 bg-clip-text text-transparent mb-2">
-          How can SABU help you today?
+          How can FAISI help you today?
         </h2>
 
         {/* Inclusive Subtitle */}
         <p className="text-xs sm:text-sm text-neutral-400 dark:text-neutral-400 light:text-neutral-600 max-w-md mb-4 leading-relaxed">
-          SABU AI is designed to assist you with learning, writing, coding, analysis, and everyday inquiries.
+          FAISI AI is designed to assist you with learning, writing, coding, analysis, and everyday inquiries.
         </p>
 
         {/* Capability Pills */}

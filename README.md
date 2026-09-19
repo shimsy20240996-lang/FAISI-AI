@@ -1,8 +1,12 @@
-# SABU AI
+# FAISI AI
 
 **Your AI. Your Way.**
 
-SABU AI is a modern, accessible AI assistant and workspace platform powered by Google Gemini and built with a secure full-stack architecture, persistent MongoDB database storage, robust user authentication with HTTP-only cookie sessions, and a secure multi-format document analysis pipeline.
+FAISI AI is a modern, accessible AI assistant designed to help you learn, create, explore, and get things done. Powered by Google Gemini, FAISI AI is built with a secure full-stack architecture, persistent MongoDB database storage, robust user authentication with HTTP-only cookie sessions, and a secure multi-format document analysis pipeline.
+
+> **FAISI AI**<br />
+> Inspired by Failul Rahman & Sithy Siyama.<br />
+> *Your AI. Your Way.*
 
 ---
 
@@ -10,7 +14,7 @@ SABU AI is a modern, accessible AI assistant and workspace platform powered by G
 
 ```text
 ┌────────────────────────────────────────────────────────┐
-│             SABU AI Frontend (React 19 + Vite)          │
+│             FAISI AI Frontend (React 19 + Vite)        │
 │   - React AuthContext (Session & State Management)     │
 │   - Document Workspace & AI Analysis Hub Modal         │
 │   - Accessible FileUploadZone (Drag-and-Drop)          │
@@ -25,7 +29,7 @@ SABU AI is a modern, accessible AI assistant and workspace platform powered by G
                             │  (/api/auth/*, /api/conversations/*, /api/documents/*, /api/chat/stream)
                             ▼
 ┌────────────────────────────────────────────────────────┐
-│             SABU AI Backend (Node.js + Express)        │
+│             FAISI AI Backend (Node.js + Express)       │
 │   - Multer In-Memory Single-File Stream Handler (10MB) │
 │   - Multi-Layer File Validator (Magic Bytes / OpenXML) │
 │   - Storage Service Abstraction (localStorageProvider) │
@@ -59,9 +63,9 @@ SABU AI is a modern, accessible AI assistant and workspace platform powered by G
 └──────────────────────────┘
 ```
 
-## 🚀 Release Stage: SABU AI v0.8.1 (Production Release Candidate)
+## 🚀 Release Stage: FAISI AI v0.8.1 (Production Release Candidate)
 
-SABU AI has completed all core capabilities across Phases 0 through 10.7 and is in **Phase 10.8 — Release Preparation**. The system provides an end-to-end, multi-tenant AI workspace and production runtime:
+FAISI AI has completed all core capabilities across Phases 0 through 10.7 and is in **Phase 10.8 — Release Preparation**. The system provides an end-to-end, multi-tenant AI workspace and production runtime:
 
 - **Supported Document Formats**: Native support for `PDF`, `DOCX`, `CSV`, and `TXT` files.
 - **Multi-Layer Structural File Validation**:
@@ -164,7 +168,7 @@ nova-ai/
 │   │   └── ai/
 │   │       ├── aiService.js         # Provider abstraction interface (chat & analyzeDocument)
 │   │       ├── geminiService.js     # Concrete @google/genai implementation with timeout protection
-│   │       └── systemPrompt.js      # Central SABU AI instruction + Document Analysis prompt armor
+│   │       └── systemPrompt.js      # Central FAISI AI instruction + Document Analysis prompt armor
 │   ├── test/
 │   │   ├── phase4.test.js           # Phase 4 schema test suite
 │   │   ├── phase5.test.js           # Phase 5 authentication & IDOR test suite
@@ -338,7 +342,7 @@ node --test "server/test/*.test.js"
 
 ## ⚙️ Production Environment & Configuration (Phase 10.1)
 
-SABU AI utilizes a strict, environment-aware configuration engine with built-in validation to prevent insecure defaults from reaching production.
+FAISI AI utilizes a strict, environment-aware configuration engine with built-in validation to prevent insecure defaults from reaching production.
 
 ### Environment Matrix
 
@@ -381,7 +385,7 @@ SABU AI utilizes a strict, environment-aware configuration engine with built-in 
 
 ### 1. Conceptual Production Architecture
 
-SABU AI supports two production deployment topologies:
+FAISI AI supports two production deployment topologies:
 
 #### Option A: Unified Same-Origin Architecture (Recommended)
 ```text
@@ -542,13 +546,13 @@ User Browser ──── HTTPS ────► Frontend Host / CDN (e.g. https:
 
 ### 12. Storage Persistence Limitation (Ephemeral vs Persistent Volumes)
 > [!WARNING]
-> SABU AI stores processed documents on the local filesystem (`storage/documents/`). On cloud platforms with ephemeral containers (e.g. basic dynos, serverless), filesystem writes are wiped on restart/redeploy. For production durability, deploy with a **Persistent Volume / Mounted Disk** or host on a persistent VM instance until cloud object storage (S3/GCS) is implemented in a future phase.
+> FAISI AI stores processed documents on the local filesystem (`storage/documents/`). On cloud platforms with ephemeral containers (e.g. basic dynos, serverless), filesystem writes are wiped on restart/redeploy. For production durability, deploy with a **Persistent Volume / Mounted Disk** or host on a persistent VM instance until cloud object storage (S3/GCS) is implemented in a future phase.
 
 ---
 
 ### 13. Single-Instance Architecture & Scaling Requirements
 > [!NOTE]
-> SABU AI currently uses process-local in-memory state for:
+> FAISI AI currently uses process-local in-memory state for:
 > 1. `UploadConcurrencyManager` (RAM concurrency guard)
 > 2. `StreamConcurrencyManager` (SSE stream bounds)
 > 3. `TTSCache` (In-memory audio synthesis cache)
@@ -591,7 +595,7 @@ docker run -d \
 
 ### 15. Operational Observability & Telemetry (Phase 10.6)
 
-SABU AI includes a bounded, deterministic, in-memory operational telemetry engine providing real-time visibility into HTTP traffic, AI operations, SSE streams, database status, document pipelines, RAG searches, media processing, and rate limiting.
+FAISI AI includes a bounded, deterministic, in-memory operational telemetry engine providing real-time visibility into HTTP traffic, AI operations, SSE streams, database status, document pipelines, RAG searches, media processing, and rate limiting.
 
 #### Metrics Endpoint
 ```http

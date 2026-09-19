@@ -7,7 +7,10 @@ import { useState, useEffect } from 'react';
 export function useTheme() {
   const [theme, setTheme] = useState(() => {
     try {
-      const saved = localStorage.getItem('sabu_theme') || localStorage.getItem('nova_theme');
+      const saved =
+        localStorage.getItem('faisi_theme') ||
+        localStorage.getItem('sabu_theme') ||
+        localStorage.getItem('nova_theme');
       if (saved === 'light' || saved === 'dark') return saved;
       return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     } catch {
@@ -26,6 +29,7 @@ export function useTheme() {
     }
 
     try {
+      localStorage.setItem('faisi_theme', theme);
       localStorage.setItem('sabu_theme', theme);
       localStorage.setItem('nova_theme', theme);
     } catch (e) {
@@ -38,7 +42,10 @@ export function useTheme() {
     try {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
       const handleSystemThemeChange = (e) => {
-        const saved = localStorage.getItem('sabu_theme') || localStorage.getItem('nova_theme');
+        const saved =
+          localStorage.getItem('faisi_theme') ||
+          localStorage.getItem('sabu_theme') ||
+          localStorage.getItem('nova_theme');
         if (!saved) {
           setTheme(e.matches ? 'light' : 'dark');
         }

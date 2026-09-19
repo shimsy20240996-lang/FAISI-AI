@@ -101,7 +101,7 @@ export function normalizeAIError(error, context = 'processing') {
     msg.includes('api key not valid')
   ) {
     return new AIProviderError(
-      'SABU is temporarily unable to connect to its AI service.',
+      'FAISI is temporarily unable to connect to its AI service.',
       401,
       'INVALID_API_KEY'
     );
@@ -115,7 +115,7 @@ export function normalizeAIError(error, context = 'processing') {
     msg.includes('quota')
   ) {
     return new AIProviderError(
-      'SABU is temporarily rate-limited. Please try again in a moment.',
+      'FAISI is temporarily rate-limited. Please try again in a moment.',
       429,
       'RATE_LIMIT_EXCEEDED'
     );
@@ -131,7 +131,7 @@ export function normalizeAIError(error, context = 'processing') {
     msg.includes('unavailable')
   ) {
     return new AIProviderError(
-      'SABU is experiencing high demand right now. Please try again in a moment.',
+      'FAISI is experiencing high demand right now. Please try again in a moment.',
       503,
       'MODEL_HIGH_DEMAND'
     );
@@ -147,7 +147,7 @@ export function normalizeAIError(error, context = 'processing') {
     msg.includes('timeout')
   ) {
     return new AIProviderError(
-      'SABU couldn\'t complete the response because the AI service took too long to respond. Please try again.',
+      'FAISI couldn\'t complete the response because the AI service took too long to respond. Please try again.',
       504,
       'TIMEOUT_ERROR'
     );
@@ -155,7 +155,7 @@ export function normalizeAIError(error, context = 'processing') {
 
   // 5. Other Upstream Service Errors
   return new AIProviderError(
-    'SABU couldn\'t reach the AI service right now. Please try again shortly.',
+    'FAISI couldn\'t reach the AI service right now. Please try again shortly.',
     code && code >= 400 && code < 600 ? code : 502,
     'UPSTREAM_SERVICE_ERROR'
   );

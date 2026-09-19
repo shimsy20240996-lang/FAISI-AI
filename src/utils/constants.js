@@ -1,10 +1,10 @@
 /**
  * Application Constants
- * Core configuration, phase metadata, and default starter threads for SABU AI.
+ * Core configuration, phase metadata, and default starter threads for FAISI AI.
  */
 
 export const APP_CONFIG = {
-  NAME: 'SABU AI',
+  NAME: 'FAISI AI',
   VERSION: '0.3.0',
   CURRENT_PHASE: 'Phase 3 — Streaming + Conversation Engine',
   STATUS: 'Live SSE Streaming',

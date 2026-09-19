@@ -288,7 +288,7 @@ export function Message({
           {/* Author Header & Timestamp */}
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             <span className="text-xs font-semibold text-neutral-200 dark:text-neutral-200 light:text-neutral-800">
-              {isAssistant ? 'SABU' : 'You'}
+              {isAssistant ? 'FAISI' : 'You'}
             </span>
             <span className="text-[10px] text-neutral-500 dark:text-neutral-500 light:text-neutral-400">
               {message.timestamp}
