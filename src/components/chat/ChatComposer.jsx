@@ -1,5 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Square, Paperclip, Mic, BookOpen, AlertCircle } from 'lucide-react';
+import {
+  Send,
+  Square,
+  Paperclip,
+  Mic,
+  BookOpen,
+  AlertCircle,
+  Layers,
+  ChevronDown,
+  Check,
+  X,
+  FileText,
+  FileSpreadsheet,
+  RefreshCw,
+  CheckCircle2,
+  FolderOpen,
+} from 'lucide-react';
 import IconButton from '../common/IconButton';
 import Badge from '../common/Badge';
 import useAutoResize from '../../hooks/useAutoResize';
@@ -17,6 +33,12 @@ import { apiUploadImages, apiTranscribeAudio } from '../../services/api';
  *   useKnowledgeBase?: boolean,
  *   onToggleKnowledgeBase?: () => void,
  *   onOpenDocuments?: () => void,
+ *   userDocuments?: Array<any>,
+ *   selectedDocumentIds?: Array<string>,
+ *   onSelectDocument?: (docId: string) => void,
+ *   onSelectAllDocuments?: () => void,
+ *   onClearDocumentSelection?: () => void,
+ *   onRefreshDocuments?: () => void,
  *   onNotice?: (featureName: string, description: string) => void,
  * }} props
  */
@@ -27,6 +49,12 @@ export function ChatComposer({
   useKnowledgeBase = false,
   onToggleKnowledgeBase,
   onOpenDocuments,
+  userDocuments = [],
+  selectedDocumentIds = [],
+  onSelectDocument,
+  onSelectAllDocuments,
+  onClearDocumentSelection,
+  onRefreshDocuments,
   onNotice,
 }) {
   const [input, setInput] = useState('');
@@ -34,9 +62,11 @@ export function ChatComposer({
   const [isUploadingImages, setIsUploadingImages] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [composerError, setComposerError] = useState('');
+  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
 
   const textareaRef = useAutoResize(input, 160);
   const fileInputRef = useRef(null);
+  const selectorRef = useRef(null);
 
   // Voice recording hook
   const handleRecordComplete = async (audioBlob) => {
@@ -74,6 +104,53 @@ export function ChatComposer({
       });
     };
   }, [pendingImages]);
+
+  // Click outside and Escape key handling for Document Selector popover
+  useEffect(() => {
+    if (!isSelectorOpen) return;
+
+    const handleClickOutside = (e) => {
+      if (selectorRef.current && !selectorRef.current.contains(e.target)) {
+        setIsSelectorOpen(false);
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsSelectorOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isSelectorOpen]);
+
+  const handleToggleSelector = () => {
+    const next = !isSelectorOpen;
+    setIsSelectorOpen(next);
+    if (next && typeof onRefreshDocuments === 'function') {
+      onRefreshDocuments();
+    }
+  };
+
+  const getDocIcon = (ext) => {
+    switch (ext?.toLowerCase()) {
+      case 'pdf':
+        return <FileText className="w-3.5 h-3.5 text-red-400 shrink-0" />;
+      case 'docx':
+        return <FileText className="w-3.5 h-3.5 text-blue-400 shrink-0" />;
+      case 'csv':
+        return <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />;
+      case 'txt':
+      default:
+        return <FileText className="w-3.5 h-3.5 text-neutral-400 shrink-0" />;
+    }
+  };
 
   const handleFilesSelected = (files) => {
     setComposerError('');
@@ -308,6 +385,227 @@ export function ChatComposer({
                 {useKnowledgeBase ? 'ON' : 'OFF'}
               </span>
             </button>
+
+            {/* Smart Document Selector (Phase 10.10) */}
+            {useKnowledgeBase && (
+              <div className="relative" ref={selectorRef}>
+                <button
+                  type="button"
+                  onClick={handleToggleSelector}
+                  disabled={isGenerating || isRecording}
+                  aria-haspopup="dialog"
+                  aria-expanded={isSelectorOpen}
+                  aria-label="Filter Knowledge Base documents"
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 sm:py-1 rounded-lg text-xs font-medium transition-all cursor-pointer select-none min-h-[44px] sm:min-h-[32px] focus-visible:ring-2 focus-visible:ring-indigo-500/80 focus-visible:outline-none ${
+                    selectedDocumentIds.length > 0
+                      ? 'bg-indigo-600/30 text-indigo-200 border border-indigo-500/60 shadow-sm shadow-indigo-500/10'
+                      : 'bg-neutral-800/60 text-neutral-300 hover:text-neutral-100 hover:bg-neutral-800 border border-neutral-700/50'
+                  }`}
+                  title={
+                    selectedDocumentIds.length > 0
+                      ? `Knowledge Base filtered to ${selectedDocumentIds.length} document${selectedDocumentIds.length > 1 ? 's' : ''}`
+                      : 'Searching all Knowledge Base documents'
+                  }
+                >
+                  <Layers className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span className="font-medium truncate max-w-[110px] sm:max-w-[140px]">
+                    {selectedDocumentIds.length === 0
+                      ? 'All Documents'
+                      : selectedDocumentIds.length === 1
+                      ? '1 Selected'
+                      : `${selectedDocumentIds.length} Selected`}
+                  </span>
+                  <ChevronDown className={`w-3 h-3 text-neutral-400 transition-transform duration-200 ${isSelectorOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Popover Dropdown */}
+                {isSelectorOpen && (
+                  <div
+                    role="dialog"
+                    aria-label="Filter Knowledge Base documents"
+                    className="absolute bottom-full mb-2 left-0 z-40 w-72 sm:w-80 max-h-[380px] bg-neutral-900/95 dark:bg-neutral-900/95 light:bg-neutral-50/95 backdrop-blur-md border border-neutral-800 dark:border-neutral-800 light:border-neutral-300 rounded-2xl shadow-2xl p-3 flex flex-col text-xs text-neutral-200"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-neutral-800/80 dark:border-neutral-800/80 light:border-neutral-200 mb-2">
+                      <div className="flex items-center gap-1.5 font-semibold text-neutral-200 dark:text-neutral-200 light:text-neutral-800">
+                        <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Filter Knowledge Base</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsSelectorOpen(false)}
+                        aria-label="Close document filter"
+                        className="p-1 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 dark:hover:bg-neutral-800 light:hover:bg-neutral-200 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* All Documents Option Row */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onClearDocumentSelection) onClearDocumentSelection();
+                      }}
+                      className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-colors cursor-pointer select-none mb-1.5 ${
+                        selectedDocumentIds.length === 0
+                          ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/40'
+                          : 'hover:bg-neutral-800/60 dark:hover:bg-neutral-800/60 light:hover:bg-neutral-100 text-neutral-300 border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
+                            selectedDocumentIds.length === 0
+                              ? 'bg-indigo-600 border-indigo-500 text-white'
+                              : 'border-neutral-600 dark:border-neutral-600 light:border-neutral-400 bg-transparent'
+                          }`}
+                        >
+                          {selectedDocumentIds.length === 0 && <Check className="w-3 h-3 stroke-[3]" />}
+                        </div>
+                        <span className="font-medium text-xs">All Documents</span>
+                      </div>
+                      <span className="text-[10px] text-neutral-500 font-mono">
+                        {userDocuments.filter((d) => d.indexingStatus === 'indexed').length} ready
+                      </span>
+                    </button>
+
+                    <div className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider px-1 mb-1">
+                      Documents
+                    </div>
+
+                    {/* Document List */}
+                    <div className="flex-1 overflow-y-auto space-y-1 max-h-[180px] pr-0.5 scrollbar-thin scrollbar-thumb-neutral-800">
+                      {userDocuments.length === 0 ? (
+                        <div className="text-center py-4 px-2 text-neutral-500">
+                          <p className="text-xs mb-2">No documents uploaded yet.</p>
+                          {onOpenDocuments && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsSelectorOpen(false);
+                                onOpenDocuments();
+                              }}
+                              className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-medium underline underline-offset-2 cursor-pointer"
+                            >
+                              <FolderOpen className="w-3 h-3" />
+                              <span>Open Document Hub</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        userDocuments.map((doc) => {
+                          const docId = doc.id || doc._id?.toString();
+                          const isIndexed = doc.indexingStatus === 'indexed';
+                          const isSelected = selectedDocumentIds.includes(docId);
+                          const isProcessing =
+                            doc.indexingStatus === 'pending' ||
+                            doc.indexingStatus === 'processing' ||
+                            doc.status === 'processing';
+                          const isFailed = doc.indexingStatus === 'failed';
+
+                          return (
+                            <div
+                              key={docId}
+                              onClick={() => {
+                                if (isIndexed && onSelectDocument) {
+                                  onSelectDocument(docId);
+                                }
+                              }}
+                              role="checkbox"
+                              aria-checked={isSelected}
+                              aria-disabled={!isIndexed}
+                              tabIndex={isIndexed ? 0 : -1}
+                              onKeyDown={(e) => {
+                                if (isIndexed && (e.key === ' ' || e.key === 'Enter')) {
+                                  e.preventDefault();
+                                  if (onSelectDocument) onSelectDocument(docId);
+                                }
+                              }}
+                              className={`flex items-center justify-between p-2 rounded-xl transition-all select-none ${
+                                isIndexed
+                                  ? isSelected
+                                    ? 'bg-indigo-950/40 border border-indigo-500/30 text-neutral-200 cursor-pointer'
+                                    : 'hover:bg-neutral-800/50 dark:hover:bg-neutral-800/50 light:hover:bg-neutral-100 text-neutral-300 border border-transparent cursor-pointer'
+                                  : 'opacity-50 cursor-not-allowed border border-transparent'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                                <div
+                                  className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 transition-colors ${
+                                    isSelected && isIndexed
+                                      ? 'bg-indigo-600 border-indigo-500 text-white'
+                                      : 'border-neutral-600 dark:border-neutral-600 light:border-neutral-400 bg-transparent'
+                                  }`}
+                                >
+                                  {isSelected && isIndexed && <Check className="w-3 h-3 stroke-[3]" />}
+                                </div>
+                                {getDocIcon(doc.extension)}
+                                <span className="font-medium text-xs truncate max-w-[130px] sm:max-w-[150px]" title={doc.originalName}>
+                                  {doc.originalName}
+                                </span>
+                              </div>
+
+                              {/* Status Badge */}
+                              <div className="shrink-0">
+                                {isIndexed ? (
+                                  <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                    <CheckCircle2 className="w-2.5 h-2.5" />
+                                    <span>Ready</span>
+                                    {doc.chunkCount > 0 && <span className="opacity-75">({doc.chunkCount})</span>}
+                                  </span>
+                                ) : isProcessing ? (
+                                  <span className="text-[10px] text-cyan-400 font-medium flex items-center gap-1 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20 animate-pulse">
+                                    <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                                    <span>Indexing</span>
+                                  </span>
+                                ) : isFailed ? (
+                                  <span className="text-[10px] text-amber-400 font-medium flex items-center gap-1 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                    <AlertCircle className="w-2.5 h-2.5" />
+                                    <span>Failed</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-neutral-500 font-medium px-1.5 py-0.5 rounded border border-neutral-800">
+                                    Unindexed
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Actions Footer */}
+                    {userDocuments.length > 0 && (
+                      <div className="flex items-center justify-between pt-2 mt-2 border-t border-neutral-800/80 dark:border-neutral-800/80 light:border-neutral-200">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onSelectAllDocuments) onSelectAllDocuments();
+                          }}
+                          disabled={userDocuments.filter((d) => d.indexingStatus === 'indexed').length === 0}
+                          className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Select All ({userDocuments.filter((d) => d.indexingStatus === 'indexed').length})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onClearDocumentSelection) onClearDocumentSelection();
+                          }}
+                          disabled={selectedDocumentIds.length === 0}
+                          className="text-[11px] text-neutral-400 hover:text-neutral-200 hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Clear Selection
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Right Submit / Stop Controls */}

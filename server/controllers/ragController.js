@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { ragService } from '../services/rag/ragService.js';
 import { retrievalService } from '../services/rag/retrievalService.js';
 import { Document } from '../models/Document.js';
@@ -92,12 +93,34 @@ export class RagController {
 
       // Validate selectedDocIds ownership
       let verifiedDocIds = [];
+      let hadExplicitSelection = false;
+
       if (Array.isArray(selectedDocIds) && selectedDocIds.length > 0) {
-        const ownedDocs = await Document.find({
-          _id: { $in: selectedDocIds },
-          userId: req.user.id,
-        }).select('_id');
-        verifiedDocIds = ownedDocs.map((d) => d._id.toString());
+        hadExplicitSelection = true;
+        const validObjectIds = [
+          ...new Set(
+            selectedDocIds
+              .filter((id) => id && typeof id === 'string' && mongoose.Types.ObjectId.isValid(id))
+              .map((id) => id.toString())
+          ),
+        ];
+
+        if (validObjectIds.length > 0) {
+          const ownedDocs = await Document.find({
+            _id: { $in: validObjectIds },
+            userId: req.user.id,
+          }).select('_id');
+          verifiedDocIds = ownedDocs.map((d) => d._id.toString());
+        }
+      }
+
+      if (hadExplicitSelection && verifiedDocIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          hasEvidence: false,
+          sources: [],
+          resultCount: 0,
+        });
       }
 
       const retrieval = await retrievalService.retrieveContext({

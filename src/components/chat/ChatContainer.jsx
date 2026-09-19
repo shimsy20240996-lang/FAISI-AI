@@ -19,6 +19,12 @@ import Button from '../common/Button';
  *   useKnowledgeBase?: boolean,
  *   onToggleKnowledgeBase?: () => void,
  *   onOpenDocuments?: () => void,
+ *   userDocuments?: Array<any>,
+ *   selectedDocumentIds?: Array<string>,
+ *   onSelectDocument?: (docId: string) => void,
+ *   onSelectAllDocuments?: () => void,
+ *   onClearDocumentSelection?: () => void,
+ *   onRefreshDocuments?: () => void,
  *   onNotice: (featureName: string, description: string) => void,
  * }} props
  */
@@ -34,6 +40,12 @@ export function ChatContainer({
   useKnowledgeBase = false,
   onToggleKnowledgeBase,
   onOpenDocuments,
+  userDocuments = [],
+  selectedDocumentIds = [],
+  onSelectDocument,
+  onSelectAllDocuments,
+  onClearDocumentSelection,
+  onRefreshDocuments,
   onNotice,
 }) {
   const messages = conversation?.messages || [];
@@ -102,6 +114,12 @@ export function ChatContainer({
         useKnowledgeBase={useKnowledgeBase}
         onToggleKnowledgeBase={onToggleKnowledgeBase}
         onOpenDocuments={onOpenDocuments}
+        userDocuments={userDocuments}
+        selectedDocumentIds={selectedDocumentIds}
+        onSelectDocument={onSelectDocument}
+        onSelectAllDocuments={onSelectAllDocuments}
+        onClearDocumentSelection={onClearDocumentSelection}
+        onRefreshDocuments={onRefreshDocuments}
         onNotice={onNotice}
       />
     </div>

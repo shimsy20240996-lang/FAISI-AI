@@ -19,6 +19,7 @@ import {
   streamChatMessage,
   apiClaimConversations,
   apiGetUnclaimedCount,
+  apiGetDocuments,
 } from './services/api';
 
 const LOCAL_STORAGE_KEY_FAISI = 'faisi_local_conversations';
@@ -97,12 +98,54 @@ function App() {
   // Document Hub modal state (Phase 6)
   const [isDocumentHubOpen, setIsDocumentHubOpen] = useState(false);
 
-  // Knowledge Base RAG state (Phase 7)
+  // Knowledge Base RAG state & Document Selection (Phase 7 & Phase 10.10)
   const [useKnowledgeBase, setUseKnowledgeBase] = useState(false);
+  const [userDocuments, setUserDocuments] = useState([]);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
 
   const activeAbortControllerRef = useRef(null);
   const lastFailedActionRef = useRef(null);
   const claimDismissedRef = useRef(false);
+
+  // Fetch / refresh user documents for the document selector
+  const refreshUserDocuments = useCallback(async () => {
+    if (!isAuthenticated) {
+      setUserDocuments([]);
+      return;
+    }
+    try {
+      const res = await apiGetDocuments(100, 0);
+      setUserDocuments(res.documents || []);
+    } catch (err) {
+      console.warn('⚠️ Could not load documents for selector:', err.message);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated && useKnowledgeBase) {
+      refreshUserDocuments();
+    }
+  }, [isAuthenticated, useKnowledgeBase, refreshUserDocuments]);
+
+  const handleSelectDocument = useCallback((docId) => {
+    setSelectedDocumentIds((prev) => {
+      if (prev.includes(docId)) {
+        return prev.filter((id) => id !== docId);
+      }
+      return [...prev, docId];
+    });
+  }, []);
+
+  const handleSelectAllDocuments = useCallback(() => {
+    const indexedDocIds = userDocuments
+      .filter((d) => d.indexingStatus === 'indexed')
+      .map((d) => d.id || d._id?.toString());
+    setSelectedDocumentIds(indexedDocIds);
+  }, [userDocuments]);
+
+  const handleClearDocumentSelection = useCallback(() => {
+    setSelectedDocumentIds([]);
+  }, []);
 
   // Document Hub opener & closer
   const handleOpenDocuments = useCallback(() => {
@@ -111,7 +154,10 @@ function App() {
 
   const handleCloseDocuments = useCallback(() => {
     setIsDocumentHubOpen(false);
-  }, []);
+    if (isAuthenticated && useKnowledgeBase) {
+      refreshUserDocuments();
+    }
+  }, [isAuthenticated, useKnowledgeBase, refreshUserDocuments]);
 
   // Load conversations whenever authentication state changes
   useEffect(() => {
@@ -233,6 +279,7 @@ function App() {
     if (isGenerating) {
       handleStopGeneration();
     }
+    setSelectedDocumentIds([]);
 
     if (isAuthenticated) {
       try {
@@ -516,6 +563,10 @@ function App() {
           conversationId: isAuthenticated && activeId && !activeId.startsWith('conv-') ? activeId : undefined,
           isRegenerate: false,
           useKnowledgeBase: useKnowledgeBase && isAuthenticated,
+          selectedDocIds:
+            useKnowledgeBase && isAuthenticated && selectedDocumentIds.length > 0
+              ? selectedDocumentIds
+              : undefined,
           attachments: attachments && attachments.length > 0 ? attachments : undefined,
         },
         {
@@ -665,6 +716,10 @@ function App() {
           conversationId: isAuthenticated && activeId && !activeId.startsWith('conv-') ? activeId : undefined,
           isRegenerate: true,
           useKnowledgeBase: useKnowledgeBase && isAuthenticated,
+          selectedDocIds:
+            useKnowledgeBase && isAuthenticated && selectedDocumentIds.length > 0
+              ? selectedDocumentIds
+              : undefined,
         },
         {
           onSources: (sources) => {
@@ -801,7 +856,13 @@ function App() {
     if (!isAuthenticated) {
       setAuthModalState({ isOpen: true, mode: 'login' });
     } else {
-      setUseKnowledgeBase((prev) => !prev);
+      setUseKnowledgeBase((prev) => {
+        const next = !prev;
+        if (!next) {
+          setSelectedDocumentIds([]);
+        }
+        return next;
+      });
     }
   }, [isAuthenticated]);
 
@@ -833,6 +894,12 @@ function App() {
           useKnowledgeBase={useKnowledgeBase}
           onToggleKnowledgeBase={handleToggleKnowledgeBase}
           onOpenDocuments={handleOpenDocuments}
+          userDocuments={userDocuments}
+          selectedDocumentIds={selectedDocumentIds}
+          onSelectDocument={handleSelectDocument}
+          onSelectAllDocuments={handleSelectAllDocuments}
+          onClearDocumentSelection={handleClearDocumentSelection}
+          onRefreshDocuments={refreshUserDocuments}
           onNotice={handleNotice}
         />
       </MainLayout>

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { aiService } from '../services/ai/aiService.js';
 import { conversationService } from '../services/conversationService.js';
 import { retrievalService } from '../services/rag/retrievalService.js';
@@ -200,14 +201,53 @@ export async function handleChatStream(req, res) {
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
 
     if (lastUserMsg?.content) {
-      // 1. Verify selected document IDs
+      // 1. Verify selected document IDs (IDOR & Type Hardening)
       let verifiedDocIds = [];
+      let hadExplicitSelection = false;
+
       if (Array.isArray(selectedDocIds) && selectedDocIds.length > 0) {
-        const ownedDocs = await Document.find({
-          _id: { $in: selectedDocIds },
-          userId,
-        }).select('_id');
-        verifiedDocIds = ownedDocs.map((d) => d._id.toString());
+        hadExplicitSelection = true;
+        const validObjectIds = [
+          ...new Set(
+            selectedDocIds
+              .filter((id) => id && typeof id === 'string' && mongoose.Types.ObjectId.isValid(id))
+              .map((id) => id.toString())
+          ),
+        ];
+
+        if (validObjectIds.length > 0) {
+          const ownedDocs = await Document.find({
+            _id: { $in: validObjectIds },
+            userId,
+          }).select('_id');
+          verifiedDocIds = ownedDocs.map((d) => d._id.toString());
+        }
+      }
+
+      // If user explicitly selected documents, but none are valid or owned by user,
+      // return no evidence immediately without querying all user documents or leaking info.
+      if (hadExplicitSelection && verifiedDocIds.length === 0) {
+        const noEvidenceText =
+          "I couldn't find enough relevant information in your uploaded documents to answer this confidently.";
+        res.write(`data: ${JSON.stringify({ type: 'chunk', text: noEvidenceText })}\n\n`);
+
+        if (conversationId && userId && isDatabaseConnected()) {
+          try {
+            await conversationService.addMessage(userId, conversationId, {
+              role: 'assistant',
+              content: noEvidenceText,
+              status: 'complete',
+            });
+          } catch (dbErr) {
+            console.warn('⚠️  Could not persist no-evidence response:', dbErr.message);
+          }
+        }
+
+        finalizeSSE('completed');
+        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        res.end();
+        releaseConcurrency();
+        return;
       }
 
       // 2. Retrieve context from Knowledge Base
