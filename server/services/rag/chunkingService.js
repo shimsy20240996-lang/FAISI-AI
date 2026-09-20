@@ -2,7 +2,8 @@ import { ENV } from '../../config/env.js';
 
 /**
  * Intelligent Semantic Boundary Document Chunking Service
- * Respects section headings, paragraphs, sentence punctuation, and CSV tables.
+ * Respects section headings, paragraphs, sentence punctuation, CSV tables,
+ * and authentic PDF page boundaries.
  * Enforces truthful provenance (never fabricates page numbers or section titles).
  */
 export class ChunkingService {
@@ -113,7 +114,122 @@ export class ChunkingService {
   }
 
   /**
-   * Main entry point: chunks a Document into structured chunk objects ready for embedding
+   * Parses page-delimited PDF extractedText into structured page segments.
+   * Matches deterministic headers formatted by pdfExtractor: "--- Page N ---"
+   * @param {string} text
+   * @returns {Array<{ pageNumber: number, text: string }>}
+   */
+  parsePdfPages(text) {
+    if (!text || typeof text !== 'string') return [];
+
+    const pageMarkerRegex = /(?:^|\n)--- Page (\d+) ---\n/g;
+    const matches = [...text.matchAll(pageMarkerRegex)];
+
+    if (matches.length === 0) {
+      return [];
+    }
+
+    const pages = [];
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const pageNum = parseInt(match[1], 10);
+      const contentStartIndex = match.index + match[0].length;
+      const nextMatch = matches[i + 1];
+      const contentEndIndex = nextMatch ? nextMatch.index : text.length;
+      const pageText = text.slice(contentStartIndex, contentEndIndex).trim();
+
+      if (pageNum >= 1 && pageText.length > 0) {
+        pages.push({
+          pageNumber: pageNum,
+          text: pageText,
+        });
+      }
+    }
+
+    return pages;
+  }
+
+  /**
+   * Dedicated page-aware PDF chunker.
+   * Assigns authentic 1-indexed page numbers to each chunk adhering to the primary/start-page rule.
+   * @param {Object} doc Document record
+   * @param {string} generationId Generation UUID
+   * @returns {Array<{ chunkId: string, chunkIndex: number, text: string, textLength: number, title: string, metadata: Object }>}
+   */
+  chunkPdf(doc, generationId) {
+    const docId = doc._id.toString();
+    const sourceName = doc.originalName || 'Document';
+    const mimeType = doc.mimeType || 'application/pdf';
+    const extractedText = doc.extractedText || '';
+
+    const parsedPages = this.parsePdfPages(extractedText);
+    const chunks = [];
+    let globalChunkIndex = 0;
+
+    if (parsedPages.length > 0) {
+      // Multi-page PDF with authentic page boundaries
+      for (const page of parsedPages) {
+        if (chunks.length >= this.maxChunksPerDoc) {
+          break;
+        }
+
+        const pageChunks = this.splitText(page.text);
+        for (const chunkText of pageChunks) {
+          if (chunks.length >= this.maxChunksPerDoc) {
+            break;
+          }
+
+          chunks.push({
+            chunkId: `${docId}_${generationId}_c${globalChunkIndex}`,
+            chunkIndex: globalChunkIndex,
+            text: chunkText,
+            textLength: chunkText.length,
+            title: sourceName,
+            metadata: {
+              sourceName,
+              mimeType,
+              pageNumber: page.pageNumber, // Authentic 1-indexed source page
+              sectionTitle: null,
+              isCsv: false,
+            },
+          });
+          globalChunkIndex++;
+        }
+      }
+    } else {
+      // Single-page PDF or text without explicit multi-page delimiters
+      const rawChunks = this.splitText(extractedText);
+      const pageNumber = doc.pageCount === 1 || doc.pageCount === null || doc.pageCount === undefined ? 1 : null;
+
+      for (const chunkText of rawChunks) {
+        if (chunks.length >= this.maxChunksPerDoc) {
+          break;
+        }
+
+        chunks.push({
+          chunkId: `${docId}_${generationId}_c${globalChunkIndex}`,
+          chunkIndex: globalChunkIndex,
+          text: chunkText,
+          textLength: chunkText.length,
+          title: sourceName,
+          metadata: {
+            sourceName,
+            mimeType,
+            pageNumber, // Page 1 for single-page PDF, or null if unresolvable
+            sectionTitle: null,
+            isCsv: false,
+          },
+        });
+        globalChunkIndex++;
+      }
+    }
+
+    return chunks;
+  }
+
+  /**
+   * Main entry point: chunks a Document into structured chunk objects ready for embedding.
+   * Strictly enforces truthful provenance (PDF receives authentic pageNumber; non-PDF receives null).
    * @param {Object} doc Mongoose Document or plain object
    * @param {string} generationId Unique generation UUID
    * @returns {Array<{ chunkId: string, chunkIndex: number, text: string, textLength: number, title: string, metadata: Object }>}
@@ -124,20 +240,13 @@ export class ChunkingService {
     }
 
     const isCsv = doc.extension === 'csv';
-    const rawChunks = isCsv
-      ? this.chunkCsv(doc.extractedText, doc.csvMetadata)
-      : this.splitText(doc.extractedText);
-
+    const isPdf = doc.extension === 'pdf';
     const docId = doc._id.toString();
     const sourceName = doc.originalName || 'Document';
 
-    return rawChunks.map((chunkText, index) => {
-      // Truthful Provenance Invariant:
-      // pageNumber and sectionTitle are strictly null unless reliably available
-      const pageNumber = null; // Phase 6 text extractors do not embed per-chunk page tokens
-      const sectionTitle = null;
-
-      return {
+    if (isCsv) {
+      const rawChunks = this.chunkCsv(doc.extractedText, doc.csvMetadata);
+      return rawChunks.map((chunkText, index) => ({
         chunkId: `${docId}_${generationId}_c${index}`,
         chunkIndex: index,
         text: chunkText,
@@ -145,14 +254,36 @@ export class ChunkingService {
         title: sourceName,
         metadata: {
           sourceName,
-          mimeType: doc.mimeType || 'text/plain',
-          pageNumber,
-          sectionTitle,
-          isCsv,
+          mimeType: doc.mimeType || 'text/csv',
+          pageNumber: null, // Truthful provenance: CSV has no PDF page numbers
+          sectionTitle: null,
+          isCsv: true,
         },
-      };
-    });
+      }));
+    }
+
+    if (isPdf) {
+      return this.chunkPdf(doc, generationId);
+    }
+
+    // Non-PDF documents (TXT, DOCX, MD, etc.)
+    const rawChunks = this.splitText(doc.extractedText);
+    return rawChunks.map((chunkText, index) => ({
+      chunkId: `${docId}_${generationId}_c${index}`,
+      chunkIndex: index,
+      text: chunkText,
+      textLength: chunkText.length,
+      title: sourceName,
+      metadata: {
+        sourceName,
+        mimeType: doc.mimeType || 'text/plain',
+        pageNumber: null, // Truthful provenance: strictly null for non-PDF documents
+        sectionTitle: null,
+        isCsv: false,
+      },
+    }));
   }
 }
 
 export const chunkingService = new ChunkingService();
+
