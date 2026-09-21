@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { Document } from '../../models/Document.js';
 import { DocumentChunk } from '../../models/DocumentChunk.js';
@@ -6,6 +7,7 @@ import { storageService } from '../storage/storageService.js';
 import { validateUploadedFile } from './fileValidationService.js';
 import { extractionService } from './extractionService.js';
 import { ragService } from '../rag/ragService.js';
+import { aiService } from '../ai/aiService.js';
 import { ENV } from '../../config/env.js';
 import { recordDocumentProcessing } from '../../utils/metrics.js';
 
@@ -426,6 +428,298 @@ export class DocumentService {
       count,
       maxCount: ENV.MAX_DOCUMENTS_PER_USER,
     };
+  }
+
+  /**
+   * Helper verifying whether persisted document intelligence is valid for the current document content.
+   * @param {Object} doc
+   * @returns {boolean}
+   */
+  isCachedIntelligenceValid(doc) {
+    if (!doc || !doc.intelligence) return false;
+    const { intelligence, sha256 } = doc;
+    return (
+      intelligence.status === 'ready' &&
+      intelligence.sourceSha256 === sha256 &&
+      typeof intelligence.summary === 'string' &&
+      intelligence.summary.trim().length > 0 &&
+      Array.isArray(intelligence.keyTopics) &&
+      Array.isArray(intelligence.keyFacts)
+    );
+  }
+
+  /**
+   * Retrieves persisted intelligence for a document (IDOR protected, 0 Gemini calls).
+   * @param {string | mongoose.Types.ObjectId} userId
+   * @param {string} documentId
+   * @returns {Promise<Object | null>}
+   */
+  async getDocumentIntelligence(userId, documentId) {
+    const doc = await this.getUserDocument(userId, documentId);
+    if (!doc) {
+      return null;
+    }
+
+    const STALE_LOCK_MS = 90000;
+    const isStaleHash = doc.intelligence?.sourceSha256 && doc.intelligence.sourceSha256 !== doc.sha256;
+
+    if (this.isCachedIntelligenceValid(doc)) {
+      return {
+        status: 'ready',
+        cached: true,
+        documentId: doc._id.toString(),
+        documentName: doc.originalName,
+        intelligence: doc.intelligence,
+      };
+    }
+
+    if (doc.intelligence?.status === 'generating') {
+      const isStale =
+        doc.intelligence.generationStartedAt &&
+        Date.now() - new Date(doc.intelligence.generationStartedAt).getTime() > STALE_LOCK_MS;
+
+      if (isStale) {
+        return {
+          status: 'idle',
+          isStale: true,
+          documentId: doc._id.toString(),
+          documentName: doc.originalName,
+          intelligence: { status: 'idle' },
+        };
+      }
+
+      return {
+        status: 'generating',
+        inProgress: true,
+        documentId: doc._id.toString(),
+        documentName: doc.originalName,
+        intelligence: doc.intelligence,
+      };
+    }
+
+    if (doc.intelligence?.status === 'failed') {
+      return {
+        status: 'failed',
+        documentId: doc._id.toString(),
+        documentName: doc.originalName,
+        intelligence: doc.intelligence,
+      };
+    }
+
+    if (isStaleHash) {
+      return {
+        status: 'idle',
+        isStale: true,
+        documentId: doc._id.toString(),
+        documentName: doc.originalName,
+        intelligence: { status: 'idle' },
+      };
+    }
+
+    return {
+      status: doc.intelligence?.status || 'idle',
+      documentId: doc._id.toString(),
+      documentName: doc.originalName,
+      intelligence: doc.intelligence || { status: 'idle' },
+    };
+  }
+
+  /**
+   * Generates or retrieves structured document intelligence with atomic concurrency claim,
+   * SHA-256 cache verification, stale-lock recovery, and safe error restoration.
+   * @param {string | mongoose.Types.ObjectId} userId
+   * @param {string} documentId
+   * @param {{ force?: boolean }} [options]
+   */
+  async generateDocumentIntelligence(userId, documentId, { force = false } = {}) {
+    const doc = await this.getUserDocument(userId, documentId);
+    if (!doc) {
+      const err = new Error('Document not found or unauthorized.');
+      err.statusCode = 404;
+      err.code = 'DOCUMENT_NOT_FOUND';
+      throw err;
+    }
+
+    if (doc.status !== 'ready') {
+      const err = new Error(`Document is currently in "${doc.status}" state and cannot be analyzed yet.`);
+      err.statusCode = 400;
+      err.code = 'DOCUMENT_NOT_READY';
+      throw err;
+    }
+
+    if (doc.extractionStatus !== 'complete') {
+      const err = new Error(`Document extraction is currently in "${doc.extractionStatus}" state.`);
+      err.statusCode = 400;
+      err.code = 'EXTRACTION_NOT_COMPLETE';
+      throw err;
+    }
+
+    if (!doc.extractedText || doc.extractedText.trim().length === 0) {
+      const err = new Error('Document contains no extractable text for intelligence generation.');
+      err.statusCode = 400;
+      err.code = 'NO_EXTRACTABLE_TEXT';
+      throw err;
+    }
+
+    // Step 1: Cache hit check (if not forced)
+    if (!force && this.isCachedIntelligenceValid(doc)) {
+      return {
+        cached: true,
+        documentId: doc._id.toString(),
+        documentName: doc.originalName,
+        intelligence: doc.intelligence,
+      };
+    }
+
+    // Track whether previous valid intelligence existed before locking for safe non-destructive restoration
+    const hadPriorValidIntelligence =
+      doc.intelligence?.status === 'ready' &&
+      doc.intelligence?.sourceSha256 === doc.sha256 &&
+      typeof doc.intelligence?.summary === 'string' &&
+      doc.intelligence.summary.trim().length > 0;
+
+    // Step 2: Atomic lock acquisition
+    const STALE_LOCK_MS = 90000;
+    const staleCutoff = new Date(Date.now() - STALE_LOCK_MS);
+    const generationId = crypto.randomUUID();
+    const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+    const claimQuery = {
+      _id: doc._id,
+      userId: userObjectId,
+      status: 'ready',
+      $or: [
+        { 'intelligence.status': { $in: ['idle', 'failed'] } },
+        { 'intelligence.status': { $exists: false } },
+        { 'intelligence.status': 'ready', 'intelligence.sourceSha256': { $ne: doc.sha256 } },
+        { 'intelligence.status': 'generating', 'intelligence.generationStartedAt': { $lt: staleCutoff } },
+        ...(force ? [{ 'intelligence.status': 'ready' }] : []),
+      ],
+    };
+
+    const lockedDoc = await Document.findOneAndUpdate(
+      claimQuery,
+      {
+        $set: {
+          'intelligence.status': 'generating',
+          'intelligence.generationId': generationId,
+          'intelligence.generationStartedAt': new Date(),
+        },
+      },
+      { new: true }
+    );
+
+    // If another process already holds active generation lock
+    if (!lockedDoc) {
+      const currentDoc = await this.getUserDocument(userId, documentId);
+      if (currentDoc?.intelligence?.status === 'generating') {
+        const isStale =
+          currentDoc.intelligence.generationStartedAt &&
+          Date.now() - new Date(currentDoc.intelligence.generationStartedAt).getTime() > STALE_LOCK_MS;
+
+        if (!isStale) {
+          return {
+            inProgress: true,
+            documentId: doc._id.toString(),
+            documentName: doc.originalName,
+            intelligence: currentDoc.intelligence,
+            message: 'Intelligence generation is already in progress.',
+          };
+        }
+      }
+
+      if (!force && this.isCachedIntelligenceValid(currentDoc)) {
+        return {
+          cached: true,
+          documentId: doc._id.toString(),
+          documentName: doc.originalName,
+          intelligence: currentDoc.intelligence,
+        };
+      }
+    }
+
+    // Step 3: Execute structured Gemini intelligence generation
+    try {
+      const genResult = await aiService.generateDocumentIntelligence({
+        documentText: doc.extractedText,
+        fileName: doc.originalName,
+      });
+
+      if (!genResult) {
+        throw new Error('AI intelligence generation returned empty response');
+      }
+
+      const updated = await Document.findOneAndUpdate(
+        {
+          _id: doc._id,
+          userId: userObjectId,
+          'intelligence.generationId': generationId,
+        },
+        {
+          $set: {
+            'intelligence.status': 'ready',
+            'intelligence.summary': genResult.summary,
+            'intelligence.keyTopics': genResult.keyTopics,
+            'intelligence.keyFacts': genResult.keyFacts,
+            'intelligence.sourceSha256': doc.sha256,
+            'intelligence.model': genResult.model,
+            'intelligence.promptVersion': genResult.promptVersion || 'v1',
+            'intelligence.generatedAt': new Date(),
+            'intelligence.generationId': generationId,
+            'intelligence.generationStartedAt': null,
+            'intelligence.error': null,
+          },
+        },
+        { new: true }
+      );
+
+      return {
+        cached: false,
+        documentId: doc._id.toString(),
+        documentName: doc.originalName,
+        intelligence: updated ? updated.intelligence : genResult,
+      };
+    } catch (genErr) {
+      const sanitizedError = (genErr.message || 'Intelligence generation failed')
+        .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+        .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]');
+
+      if (hadPriorValidIntelligence) {
+        // Safe restoration: preserve valid prior intelligence!
+        await Document.updateOne(
+          {
+            _id: doc._id,
+            userId: userObjectId,
+            'intelligence.generationId': generationId,
+          },
+          {
+            $set: {
+              'intelligence.status': 'ready',
+              'intelligence.generationStartedAt': null,
+              'intelligence.error': sanitizedError,
+            },
+          }
+        );
+      } else {
+        await Document.updateOne(
+          {
+            _id: doc._id,
+            userId: userObjectId,
+            'intelligence.generationId': generationId,
+          },
+          {
+            $set: {
+              'intelligence.status': 'failed',
+              'intelligence.generationId': null,
+              'intelligence.generationStartedAt': null,
+              'intelligence.error': sanitizedError,
+            },
+          }
+        );
+      }
+
+      throw genErr;
+    }
   }
 }
 

@@ -118,6 +118,36 @@ class AIService {
         });
     }
   }
+
+  /**
+   * Generates structured persistent document intelligence (Executive Summary, Key Topics, Key Facts) from the active AI provider.
+   * @param {{
+   *   documentText: string,
+   *   fileName: string,
+   *   signal?: AbortSignal,
+   *   onModelSelected?: (model: string) => void,
+   *   provider?: string,
+   * }} params
+   * @returns {Promise<{ summary: string, keyTopics: string[], keyFacts: string[], model: string, promptVersion: string }>}
+   */
+  async generateDocumentIntelligence({
+    documentText,
+    fileName,
+    signal,
+    onModelSelected,
+    provider = 'gemini',
+  }) {
+    switch (provider.toLowerCase()) {
+      case 'gemini':
+      default:
+        return await this.defaultProvider.generateDocumentIntelligence({
+          documentText,
+          fileName,
+          signal,
+          onModelSelected,
+        });
+    }
+  }
 }
 
 export const aiService = new AIService();

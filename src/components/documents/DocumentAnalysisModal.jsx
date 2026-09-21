@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, X, Copy, Check, Send, AlertCircle, Loader2, RefreshCw, FileText, CheckCircle2 } from 'lucide-react';
 import { apiAnalyzeDocument } from '../../services/api';
 
@@ -28,10 +28,43 @@ export default function DocumentAnalysisModal({ document, isOpen, onClose }) {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    if (!isOpen || !document) return;
+    setInstruction(PROMPT_PRESETS[0].instruction);
+    setError('');
+    setCopied(false);
+    if (document.intelligence?.status === 'ready' && document.intelligence?.summary) {
+      setAnalysisResult({
+        role: 'assistant',
+        content: document.intelligence.summary,
+        model: document.intelligence.model || 'gemini-3.6-flash',
+        isCached: true,
+      });
+    } else {
+      setAnalysisResult(null);
+    }
+  }, [isOpen, document]);
+
   if (!isOpen || !document) return null;
 
   const maxChars = 1000;
   const remainingChars = maxChars - instruction.length;
+
+  const handleSelectPreset = (presetInstruction) => {
+    setInstruction(presetInstruction);
+    if (
+      presetInstruction === PROMPT_PRESETS[0].instruction &&
+      document.intelligence?.status === 'ready' &&
+      document.intelligence?.summary
+    ) {
+      setAnalysisResult({
+        role: 'assistant',
+        content: document.intelligence.summary,
+        model: document.intelligence.model || 'gemini-3.6-flash',
+        isCached: true,
+      });
+    }
+  };
 
   const handleRunAnalysis = async () => {
     if (!instruction.trim() || isAnalyzing) return;
@@ -105,7 +138,7 @@ export default function DocumentAnalysisModal({ document, isOpen, onClose }) {
                 <button
                   key={idx}
                   type="button"
-                  onClick={() => setInstruction(preset.instruction)}
+                  onClick={() => handleSelectPreset(preset.instruction)}
                   disabled={isAnalyzing}
                   className={`p-2.5 text-left rounded-xl text-xs transition-all border ${
                     instruction === preset.instruction
@@ -180,6 +213,11 @@ export default function DocumentAnalysisModal({ document, isOpen, onClose }) {
                 <div className="flex items-center gap-2 text-xs font-semibold text-cyan-300">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   <span>Gemini 3.6 Flash Insights:</span>
+                  {analysisResult.isCached && (
+                    <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                      Persistent Intelligence
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"

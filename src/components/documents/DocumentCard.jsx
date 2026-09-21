@@ -157,6 +157,21 @@ export default function DocumentCard({
     );
   };
 
+  const getIntelligenceBadge = () => {
+    if (document.intelligence?.status === 'ready' && document.intelligence?.summary) {
+      return (
+        <span
+          className="flex items-center gap-1 text-[10px] font-medium text-cyan-300 bg-cyan-500/15 px-2 py-0.5 rounded-md border border-cyan-500/30"
+          title="Persistent AI Document Intelligence is ready"
+        >
+          <Sparkles className="w-2.5 h-2.5 text-cyan-400" />
+          <span>Intelligence</span>
+        </span>
+      );
+    }
+    return null;
+  };
+
   const badge = getFormatBadge(extension);
 
   return (
@@ -173,6 +188,7 @@ export default function DocumentCard({
             </span>
           </div>
           <div className="flex items-center gap-1.5">
+            {getIntelligenceBadge()}
             {getIndexingBadge()}
             {getStatusBadge(status)}
           </div>

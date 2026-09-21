@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { ENV } from '../../config/env.js';
 import { AIProviderError, TimeoutError } from '../../utils/errors.js';
-import { NOVA_SYSTEM_INSTRUCTION } from './systemPrompt.js';
+import { NOVA_SYSTEM_INSTRUCTION, DOCUMENT_INTELLIGENCE_SYSTEM_INSTRUCTION } from './systemPrompt.js';
 import { recordAITelemetry, recordAIRetryTelemetry, normalizeStatusClass } from '../../utils/metrics.js';
 import { logger } from '../../utils/logger.js';
 
@@ -197,6 +197,60 @@ export async function executeWithTransientRetry(
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
+}
+
+/**
+ * Validates, defensively parses, and bounds structured document intelligence JSON output from Gemini.
+ * @param {string} rawText
+ * @returns {{ summary: string, keyTopics: string[], keyFacts: string[] }}
+ */
+export function validateAndSanitizeIntelligence(rawText) {
+  if (!rawText || typeof rawText !== 'string' || !rawText.trim()) {
+    throw new AIProviderError('No intelligence output was returned by the AI model.', 502, 'EMPTY_AI_RESPONSE');
+  }
+
+  let cleanJson = rawText.trim();
+  // Defensive: Strip markdown code fences if present (e.g. ```json ... ``` or ``` ...)
+  cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(cleanJson);
+  } catch {
+    throw new AIProviderError('AI model produced invalid or unparseable JSON for document intelligence.', 502, 'INVALID_STRUCTURED_OUTPUT');
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new AIProviderError('Document intelligence output must be a valid JSON object.', 502, 'INVALID_STRUCTURED_OUTPUT');
+  }
+
+  const { summary, keyTopics, keyFacts } = parsed;
+
+  if (typeof summary !== 'string' || !summary.trim()) {
+    throw new AIProviderError('Document intelligence output is missing a valid summary string.', 502, 'INVALID_STRUCTURED_OUTPUT');
+  }
+
+  if (!Array.isArray(keyTopics) || !Array.isArray(keyFacts)) {
+    throw new AIProviderError('Document intelligence output keyTopics and keyFacts must be arrays.', 502, 'INVALID_STRUCTURED_OUTPUT');
+  }
+
+  const boundedSummary = summary.trim().slice(0, 8000);
+
+  const sanitizedKeyTopics = keyTopics
+    .filter((t) => typeof t === 'string' && t.trim().length > 0)
+    .map((t) => t.trim().slice(0, 200))
+    .slice(0, 15);
+
+  const sanitizedKeyFacts = keyFacts
+    .filter((f) => typeof f === 'string' && f.trim().length > 0)
+    .map((f) => f.trim().slice(0, 500))
+    .slice(0, 20);
+
+  return {
+    summary: boundedSummary,
+    keyTopics: sanitizedKeyTopics,
+    keyFacts: sanitizedKeyFacts,
+  };
 }
 
 class GeminiService {
@@ -636,6 +690,185 @@ class GeminiService {
     }
 
     throw normalizeAIError(lastError, 'document_analysis');
+  }
+
+  /**
+   * Generates structured persistent document intelligence (Executive Summary, Key Topics, Key Facts)
+   * using native JSON schema constraints, prompt-injection isolation, transient retry, and fallback model.
+   * @param {{
+   *   documentText: string,
+   *   fileName: string,
+   *   signal?: AbortSignal,
+   *   onModelSelected?: (model: string) => void,
+   * }} params
+   * @returns {Promise<{ summary: string, keyTopics: string[], keyFacts: string[], model: string, promptVersion: string }>}
+   */
+  async generateDocumentIntelligence({
+    documentText,
+    fileName,
+    signal,
+    onModelSelected,
+  }) {
+    const startHr = process.hrtime.bigint();
+    const operation = 'document_intelligence';
+    const { primaryModel, fallbackModel } = getAIModelConfig();
+
+    const modelsToTry = [primaryModel];
+    if (fallbackModel && fallbackModel !== primaryModel) {
+      modelsToTry.push(fallbackModel);
+    }
+
+    let lastError = null;
+
+    for (let modelIdx = 0; modelIdx < modelsToTry.length; modelIdx++) {
+      if (signal?.aborted) {
+        return null;
+      }
+
+      const currentModel = modelsToTry[modelIdx];
+      const isFallback = modelIdx > 0;
+
+      if (typeof onModelSelected === 'function') {
+        onModelSelected(currentModel);
+      }
+
+      const maxRetries = isFallback ? 0 : 2;
+
+      try {
+        const result = await executeWithTransientRetry(
+          async () => {
+            if (signal?.aborted) return null;
+            const ai = this.getClient();
+
+            // 1. Bound document text context
+            const maxContextChars = ENV.MAX_ANALYSIS_CONTEXT_CHARS || 50000;
+            const isTruncated = documentText.length > maxContextChars;
+            const boundedText = isTruncated
+              ? documentText.slice(0, maxContextChars) + '\n\n[... Remaining document content truncated at maximum analysis context limit ...]'
+              : documentText;
+
+            const truncationNote = isTruncated
+              ? '\nNote: The document content below represents the beginning portion of the document, as it was bounded to the maximum analysis limit. Base your intelligence objectively on the provided content.'
+              : '';
+
+            const userPrompt = `Document: "${fileName}"${truncationNote}\n\n<DOCUMENT_CONTENT>\n${boundedText}\n</DOCUMENT_CONTENT>\n\nGenerate the structured intelligence JSON object for this document.`;
+
+            const contents = [
+              {
+                role: 'user',
+                parts: [{ text: userPrompt }],
+              },
+            ];
+
+            let timeoutHandle;
+            const timeoutPromise = new Promise((_, reject) => {
+              timeoutHandle = setTimeout(() => {
+                reject(new TimeoutError(`Document intelligence generation timed out after ${ENV.DOCUMENT_ANALYSIS_TIMEOUT_MS / 1000} seconds.`));
+              }, ENV.DOCUMENT_ANALYSIS_TIMEOUT_MS);
+            });
+
+            try {
+              const generatePromise = ai.models.generateContent({
+                model: currentModel,
+                contents,
+                config: {
+                  systemInstruction: DOCUMENT_INTELLIGENCE_SYSTEM_INSTRUCTION,
+                  responseMimeType: 'application/json',
+                },
+              });
+
+              const response = await Promise.race([generatePromise, timeoutPromise]);
+              clearTimeout(timeoutHandle);
+
+              if (signal?.aborted) return null;
+
+              const candidate = response?.candidates?.[0];
+              const rawText =
+                response?.text ||
+                candidate?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n') ||
+                '';
+
+              const validated = validateAndSanitizeIntelligence(rawText);
+
+              return {
+                summary: validated.summary,
+                keyTopics: validated.keyTopics,
+                keyFacts: validated.keyFacts,
+                model: currentModel,
+                promptVersion: 'v1',
+              };
+            } catch (error) {
+              clearTimeout(timeoutHandle);
+              throw error;
+            }
+          },
+          {
+            maxRetries,
+            baseDelayMs: 300,
+            maxDelayMs: 1500,
+            signal,
+            onRetry: () => recordAIRetryTelemetry({ operation, model: currentModel }),
+          }
+        );
+
+        if (signal?.aborted || !result) {
+          return null;
+        }
+
+        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+        recordAITelemetry({ operation, model: currentModel, statusClass: '2xx', durationMs, isError: false });
+        return result;
+      } catch (error) {
+        lastError = error;
+        const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+        const statusClass = normalizeStatusClass(error.statusCode || error.status || 500);
+        recordAITelemetry({ operation, model: currentModel, statusClass, durationMs, isError: true });
+
+        const isTimeout =
+          error instanceof TimeoutError ||
+          error.name === 'TimeoutError' ||
+          error.code === 'TIMEOUT_ERROR' ||
+          (error.message || '').toLowerCase().includes('timed out');
+
+        const rawReason = isTimeout
+          ? 'timeout'
+          : String(error.code || error.status || error.statusCode || (error.message ? error.message.slice(0, 100) : 'transient_failure'));
+
+        const sanitizedReason = rawReason
+          .replace(/key=[a-zA-Z0-9_-]+/gi, 'key=[REDACTED]')
+          .replace(/AIza[0-9A-Za-z-_]{35}/g, '[API_KEY_REDACTED]')
+          .slice(0, 100);
+
+        if (isTransientError(error) && modelIdx < modelsToTry.length - 1 && !signal?.aborted) {
+          const nextModel = modelsToTry[modelIdx + 1];
+
+          logger.warn('gemini.model.fallback', {
+            message: 'Primary model unavailable after retries for intelligence generation.',
+            primary: currentModel,
+            fallback: nextModel,
+            reason: sanitizedReason,
+          });
+
+          if (ENV.NODE_ENV !== 'test') {
+            console.warn(
+              `[GeminiService Fallback]\nPrimary model unavailable for intelligence generation.\nprimary=${currentModel}\nfallback=${nextModel}\nreason=${sanitizedReason}`
+            );
+          }
+          continue;
+        }
+
+        if (isFallback) {
+          logger.warn('gemini.fallback.error', {
+            fallback: currentModel,
+            reason: sanitizedReason,
+          });
+        }
+
+        throw normalizeAIError(error, 'document_intelligence');
+      }
+    }
+
+    throw normalizeAIError(lastError, 'document_intelligence');
   }
 
   /**

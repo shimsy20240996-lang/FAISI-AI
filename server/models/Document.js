@@ -109,6 +109,55 @@ const documentSchema = new mongoose.Schema(
       type: String,
       default: 'v1',
     },
+    // Phase 4B Persistent Document Intelligence
+    intelligence: {
+      status: {
+        type: String,
+        enum: ['idle', 'generating', 'ready', 'failed'],
+        default: 'idle',
+      },
+      summary: {
+        type: String,
+        default: null,
+        maxlength: 8000,
+      },
+      keyTopics: {
+        type: [String],
+        default: [],
+      },
+      keyFacts: {
+        type: [String],
+        default: [],
+      },
+      sourceSha256: {
+        type: String,
+        default: null,
+      },
+      model: {
+        type: String,
+        default: null,
+      },
+      promptVersion: {
+        type: String,
+        default: 'v1',
+      },
+      generatedAt: {
+        type: Date,
+        default: null,
+      },
+      generationId: {
+        type: String,
+        default: null,
+      },
+      generationStartedAt: {
+        type: Date,
+        default: null,
+      },
+      error: {
+        type: String,
+        default: null,
+      },
+    },
   },
   {
     timestamps: true,

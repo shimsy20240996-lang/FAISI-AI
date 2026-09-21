@@ -513,6 +513,47 @@ export async function apiAnalyzeDocument(id, instruction) {
 }
 
 /**
+ * Retrieves persisted intelligence for a document (O(1) read, 0 Gemini calls).
+ * @param {string} id
+ * @returns {Promise<{ success: boolean, documentId: string, documentName: string, status: string, cached?: boolean, intelligence: any }>}
+ */
+export async function apiGetDocumentIntelligence(id) {
+  const response = await fetch(`/api/documents/${id}/intelligence`, {
+    headers: getHeaders(),
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.error?.message || 'Failed to fetch document intelligence');
+  }
+
+  return await response.json();
+}
+
+/**
+ * Generates or retrieves structured document intelligence with cache control.
+ * @param {string} id
+ * @param {{ force?: boolean }} [options]
+ * @returns {Promise<{ success: boolean, documentId: string, documentName: string, cached?: boolean, inProgress?: boolean, intelligence: any }>}
+ */
+export async function apiGenerateDocumentIntelligence(id, { force = false } = {}) {
+  const response = await fetch(`/api/documents/${id}/intelligence`, {
+    method: 'POST',
+    headers: getHeaders(),
+    credentials: 'include',
+    body: JSON.stringify({ force }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok && response.status !== 202) {
+    throw new Error(data?.error?.message || 'Document intelligence generation failed');
+  }
+
+  return data;
+}
+
+/**
  * Deletes a document from server storage and MongoDB.
  * @param {string} id
  * @returns {Promise<{ success: boolean, message: string }>}

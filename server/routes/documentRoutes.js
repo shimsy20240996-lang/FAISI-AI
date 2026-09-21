@@ -109,6 +109,15 @@ router.post('/:id/analyze', analysisRateLimiter, validateRequestOrigin, (req, re
   documentController.analyzeDocument(req, res, next);
 });
 
+// Document Persistent Intelligence (Phase 4B)
+router.get('/:id/intelligence', (req, res, next) => {
+  documentController.getDocumentIntelligence(req, res, next);
+});
+
+router.post('/:id/intelligence', analysisRateLimiter, validateRequestOrigin, (req, res, next) => {
+  documentController.generateDocumentIntelligence(req, res, next);
+});
+
 // Index single document into Knowledge Base
 router.post('/:id/index', indexingRateLimiter, validateRequestOrigin, (req, res, next) => {
   ragController.indexDocument(req, res, next);

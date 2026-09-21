@@ -260,6 +260,78 @@ export class DocumentController {
   }
 
   /**
+   * Retrieve persisted intelligence for a document (O(1) read, 0 Gemini calls)
+   * GET /api/documents/:id/intelligence
+   */
+  async getDocumentIntelligence(req, res, next) {
+    try {
+      const result = await documentService.getDocumentIntelligence(req.user.id, req.params.id);
+
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'DOCUMENT_NOT_FOUND',
+            message: 'Document not found.',
+          },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        documentId: result.documentId,
+        documentName: result.documentName,
+        status: result.status,
+        cached: result.cached || false,
+        intelligence: result.intelligence,
+      });
+    } catch (err) {
+      const statusCode = err.statusCode || 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: {
+          code: err.code || 'FETCH_INTELLIGENCE_FAILED',
+          message: err.message || 'Failed to retrieve document intelligence.',
+        },
+      });
+    }
+  }
+
+  /**
+   * Generate or retrieve persisted structured document intelligence
+   * POST /api/documents/:id/intelligence
+   */
+  async generateDocumentIntelligence(req, res, next) {
+    try {
+      const force = req.body?.force === true || req.body?.force === 'true';
+      const result = await documentService.generateDocumentIntelligence(req.user.id, req.params.id, { force });
+
+      const statusCode = result.inProgress ? 202 : 200;
+
+      return res.status(statusCode).json({
+        success: true,
+        documentId: result.documentId,
+        documentName: result.documentName,
+        cached: result.cached || false,
+        inProgress: result.inProgress || false,
+        intelligence: result.intelligence,
+        message: result.message || undefined,
+      });
+    } catch (err) {
+      const statusCode = err.statusCode || 500;
+      const errMsg = err.message || 'Failed to generate document intelligence';
+
+      return res.status(statusCode).json({
+        success: false,
+        error: {
+          code: err.code || 'INTELLIGENCE_GENERATION_FAILED',
+          message: errMsg,
+        },
+      });
+    }
+  }
+
+  /**
    * Delete document physically and remove database record
    * DELETE /api/documents/:id
    */
