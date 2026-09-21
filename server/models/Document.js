@@ -158,15 +158,39 @@ const documentSchema = new mongoose.Schema(
         default: null,
       },
     },
+    // Phase 5 Collections & Workspace Organization
+    collectionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Collection',
+      default: null,
+      index: true,
+    },
+    tags: {
+      type: [
+        {
+          type: String,
+          trim: true,
+          lowercase: true,
+          maxlength: [30, 'Tag cannot exceed 30 characters'],
+        },
+      ],
+      default: [],
+      validate: {
+        validator: (v) => Array.isArray(v) && v.length <= 10,
+        message: 'A document cannot have more than 10 tags.',
+      },
+    },
   },
   {
     timestamps: true,
   }
 );
 
-// Compound indexes for performant user queries and duplicate lookups
+// Compound indexes for performant user queries, duplicate lookups, and collections/tags
 documentSchema.index({ userId: 1, createdAt: -1 });
 documentSchema.index({ userId: 1, sha256: 1 }, { unique: true });
+documentSchema.index({ userId: 1, collectionId: 1 });
+documentSchema.index({ userId: 1, tags: 1 });
 
 // Transform output to strip sensitive internal storage paths
 documentSchema.set('toJSON', {

@@ -5,6 +5,7 @@ import { retrievalService } from '../services/rag/retrievalService.js';
 import { imageValidationService } from '../services/media/imageValidationService.js';
 import { streamConcurrencyManager } from '../middleware/rateLimiter.js';
 import { Document } from '../models/Document.js';
+import { Collection } from '../models/Collection.js';
 import {
   NOVA_SYSTEM_INSTRUCTION,
   DOCUMENT_RAG_SYSTEM_INSTRUCTION,
@@ -67,6 +68,7 @@ export async function handleChatStream(req, res) {
     conversationId,
     isRegenerate,
     useKnowledgeBase,
+    collectionId,
     selectedDocIds,
     attachments,
   } = req.body;
@@ -201,9 +203,31 @@ export async function handleChatStream(req, res) {
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
 
     if (lastUserMsg?.content) {
-      // 1. Verify selected document IDs (IDOR & Type Hardening)
+      // 1. Verify collection / selected document IDs (IDOR & Type Hardening)
       let verifiedDocIds = [];
       let hadExplicitSelection = false;
+
+      // Resolve collection member documents if collectionId is specified
+      let collectionDocIds = null;
+      if (collectionId !== undefined && collectionId !== null && collectionId !== '') {
+        hadExplicitSelection = true;
+        if (typeof collectionId === 'string' && mongoose.Types.ObjectId.isValid(collectionId)) {
+          const ownedCol = await Collection.findOne({ _id: collectionId, userId }).select('_id');
+          if (ownedCol) {
+            const memberDocs = await Document.find({
+              userId,
+              collectionId: ownedCol._id,
+              indexingStatus: 'indexed',
+            }).select('_id');
+            collectionDocIds = memberDocs.map((d) => d._id.toString());
+          } else {
+            // Foreign or non-existent collection -> immediate zero evidence
+            collectionDocIds = [];
+          }
+        } else {
+          collectionDocIds = [];
+        }
+      }
 
       if (Array.isArray(selectedDocIds) && selectedDocIds.length > 0) {
         hadExplicitSelection = true;
@@ -224,7 +248,16 @@ export async function handleChatStream(req, res) {
         }
       }
 
-      // If user explicitly selected documents, but none are valid or owned by user,
+      // If collection scope was specified, apply intersection or collection members
+      if (collectionDocIds !== null) {
+        if (Array.isArray(selectedDocIds) && selectedDocIds.length > 0) {
+          verifiedDocIds = verifiedDocIds.filter((id) => collectionDocIds.includes(id));
+        } else {
+          verifiedDocIds = collectionDocIds;
+        }
+      }
+
+      // If user explicitly selected documents or collection, but none are valid or owned by user,
       // return no evidence immediately without querying all user documents or leaking info.
       if (hadExplicitSelection && verifiedDocIds.length === 0) {
         const noEvidenceText =

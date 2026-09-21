@@ -25,6 +25,11 @@ import Button from '../common/Button';
  *   onSelectAllDocuments?: () => void,
  *   onClearDocumentSelection?: () => void,
  *   onRefreshDocuments?: () => void,
+ *   collections?: Array<any>,
+ *   selectedCollectionId?: string | null,
+ *   onSelectCollection?: (collectionId: string | null) => void,
+ *   onClearCollection?: () => void,
+ *   onRefreshCollections?: () => void,
  *   onNotice: (featureName: string, description: string) => void,
  * }} props
  */
@@ -46,6 +51,11 @@ export function ChatContainer({
   onSelectAllDocuments,
   onClearDocumentSelection,
   onRefreshDocuments,
+  collections = [],
+  selectedCollectionId = null,
+  onSelectCollection,
+  onClearCollection,
+  onRefreshCollections,
   onNotice,
   composerPrefill = '',
   onClearComposerPrefill,
@@ -122,6 +132,11 @@ export function ChatContainer({
         onSelectAllDocuments={onSelectAllDocuments}
         onClearDocumentSelection={onClearDocumentSelection}
         onRefreshDocuments={onRefreshDocuments}
+        collections={collections}
+        selectedCollectionId={selectedCollectionId}
+        onSelectCollection={onSelectCollection}
+        onClearCollection={onClearCollection}
+        onRefreshCollections={onRefreshCollections}
         onNotice={onNotice}
         composerPrefill={composerPrefill}
         onClearComposerPrefill={onClearComposerPrefill}

@@ -11,17 +11,25 @@ import {
   AlertCircle,
   Loader2,
   FolderOpen,
+  Folder,
+  FolderPlus,
+  Tag,
   Database,
   Layers,
   BookOpen,
   ArrowRight,
   ChevronDown,
+  Edit2,
+  Trash2,
+  Check,
 } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
 import DocumentCard from './DocumentCard';
 import DocumentPreviewModal from './DocumentPreviewModal';
 import DocumentAnalysisModal from './DocumentAnalysisModal';
 import DocumentDeleteModal from './DocumentDeleteModal';
+import CollectionModal from './CollectionModal';
+import CollectionDeleteModal from './CollectionDeleteModal';
 import KnowledgeSearchResultCard from './KnowledgeSearchResultCard';
 import {
   apiGetDocuments,
@@ -30,15 +38,20 @@ import {
   apiIndexDocument,
   apiIndexAllDocuments,
   apiSearchKnowledgeBase,
+  apiGetCollections,
+  apiUpdateDocumentCollection,
+  apiUpdateDocumentTags,
 } from '../../services/api';
 
 /**
  * DocumentHubModal Component
- * Comprehensive Document Management Hub with Interactive Semantic Search & Passage Explorer.
+ * Comprehensive Document Management Hub with Collections, Tags, and Interactive Semantic Search.
  */
 export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) {
   const [activeTab, setActiveTab] = useState('files'); // 'files' | 'search'
   const [documents, setDocuments] = useState([]);
+  const [collections, setCollections] = useState([]);
+  const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -46,8 +59,13 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
   const [isIndexingAll, setIsIndexingAll] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [announcement, setAnnouncement] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFormat, setSelectedFormat] = useState('all');
+
+  // Collection & Tag Filters (Phase 5)
+  const [selectedCollectionId, setSelectedCollectionId] = useState('all'); // 'all' | 'uncategorized' | '<id>'
+  const [selectedTag, setSelectedTag] = useState(null);
 
   // Semantic Search Explorer State (Phase 3)
   const [semanticQuery, setSemanticQuery] = useState('');
@@ -63,17 +81,23 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
   const [previewDoc, setPreviewDoc] = useState(null);
   const [analyzeDoc, setAnalyzeDoc] = useState(null);
   const [deleteDoc, setDeleteDoc] = useState(null);
+  const [isCollectionModalOpen, setIsCollectionModalOpen] = useState(false);
+  const [editingCollection, setEditingCollection] = useState(null);
+  const [deleteCollectionTarget, setDeleteCollectionTarget] = useState(null);
 
   const fetchDocumentsAndStats = async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
     setError('');
 
     try {
-      const [docsData, statsData] = await Promise.all([
+      const [docsData, colsData, statsData] = await Promise.all([
         apiGetDocuments(100, 0),
+        apiGetCollections(),
         apiGetDocumentStats(),
       ]);
       setDocuments(docsData.documents || []);
+      setCollections(colsData.collections || []);
+      setUncategorizedCount(colsData.uncategorizedCount || 0);
       setStats(statsData);
     } catch (err) {
       setError(err.message || 'Failed to load documents');
@@ -126,7 +150,9 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
-        onClose();
+        if (!previewDoc && !analyzeDoc && !deleteDoc && !isCollectionModalOpen && !deleteCollectionTarget) {
+          onClose();
+        }
       }
     };
 
@@ -135,13 +161,25 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
       document.body.style.overflow = prevOverflow;
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, previewDoc, analyzeDoc, deleteDoc, isCollectionModalOpen, deleteCollectionTarget]);
 
   if (!isOpen) return null;
 
+  const announce = (msg) => {
+    setAnnouncement(msg);
+    setTimeout(() => setAnnouncement(''), 3000);
+  };
+
   const handleUploadSuccess = async (file) => {
-    const result = await apiUploadDocument(file);
-    await fetchDocumentsAndStats();
+    // If viewing a specific user collection, upload directly into that collection
+    const targetCollectionId =
+      selectedCollectionId !== 'all' && selectedCollectionId !== 'uncategorized'
+        ? selectedCollectionId
+        : null;
+
+    const result = await apiUploadDocument(file, targetCollectionId);
+    await fetchDocumentsAndStats(false);
+    announce(`Document "${file.name}" uploaded successfully.`);
     return result;
   };
 
@@ -157,6 +195,51 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
     if (searchResults.length > 0) {
       setSearchResults((prev) => prev.filter((r) => r.documentId !== deletedId));
     }
+    fetchDocumentsAndStats(false);
+    announce('Document deleted.');
+  };
+
+  const handleAssignCollection = async (doc, collectionId) => {
+    try {
+      await apiUpdateDocumentCollection(doc.id, collectionId);
+      const targetCol = collections.find((c) => c.id === collectionId);
+      const colName = targetCol ? targetCol.name : 'Uncategorized';
+      announce(`Document moved to "${colName}".`);
+      setSuccessMessage(`Moved "${doc.originalName}" to ${colName}`);
+      setTimeout(() => setSuccessMessage(''), 3000);
+      await fetchDocumentsAndStats(false);
+    } catch (err) {
+      setError(`Failed to move document: ${err.message}`);
+    }
+  };
+
+  const handleUpdateTags = async (doc, newTags) => {
+    try {
+      await apiUpdateDocumentTags(doc.id, newTags);
+      announce(`Updated tags for "${doc.originalName}".`);
+      await fetchDocumentsAndStats(false);
+    } catch (err) {
+      setError(`Failed to update tags: ${err.message}`);
+    }
+  };
+
+  const handleCollectionSuccess = (col, isEdit) => {
+    fetchDocumentsAndStats(false);
+    const msg = isEdit ? `Collection "${col.name}" updated.` : `Collection "${col.name}" created.`;
+    setSuccessMessage(msg);
+    announce(msg);
+    setTimeout(() => setSuccessMessage(''), 3500);
+  };
+
+  const handleCollectionDeleted = (deletedId, uncoupledCount) => {
+    if (selectedCollectionId === deletedId) {
+      setSelectedCollectionId('all');
+    }
+    fetchDocumentsAndStats(false);
+    const msg = `Collection deleted. ${uncoupledCount} document(s) moved to Uncategorized.`;
+    setSuccessMessage(msg);
+    announce(msg);
+    setTimeout(() => setSuccessMessage(''), 4000);
   };
 
   const handleIndexDocument = async (doc) => {
@@ -167,7 +250,7 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
       const res = await apiIndexDocument(doc.id);
       setSuccessMessage(`Indexed "${doc.originalName}" (${res.chunkCount} chunks)`);
       setTimeout(() => setSuccessMessage(''), 4000);
-      await fetchDocumentsAndStats();
+      await fetchDocumentsAndStats(false);
     } catch (err) {
       setError(`Failed to index "${doc.originalName}": ${err.message}`);
     } finally {
@@ -189,7 +272,7 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
         `Batch Index Complete: ${res.indexedCount || 0} indexed, ${res.totalChunks || 0} chunks created.`
       );
       setTimeout(() => setSuccessMessage(''), 5000);
-      await fetchDocumentsAndStats();
+      await fetchDocumentsAndStats(false);
     } catch (err) {
       setError(`Batch indexing failed: ${err.message}`);
     } finally {
@@ -230,14 +313,35 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
     }
   };
 
-  // Filter documents by search and format (Files tab)
+  // Filter documents by Collection + Tag + Search + Format (Files tab)
   const filteredDocuments = documents.filter((doc) => {
-    const matchesSearch =
-      !searchQuery.trim() ||
-      doc.originalName.toLowerCase().includes(searchQuery.toLowerCase().trim());
-    const matchesFormat =
-      selectedFormat === 'all' || doc.extension.toLowerCase() === selectedFormat;
-    return matchesSearch && matchesFormat;
+    // 1. Collection filter
+    if (selectedCollectionId === 'uncategorized') {
+      if (doc.collectionId) return false;
+    } else if (selectedCollectionId !== 'all') {
+      const docColId = doc.collectionId?.toString() || doc.collectionId;
+      if (docColId !== selectedCollectionId) return false;
+    }
+
+    // 2. Tag filter
+    if (selectedTag) {
+      if (!Array.isArray(doc.tags) || !doc.tags.includes(selectedTag)) return false;
+    }
+
+    // 3. Filename / Tag search query
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchesName = doc.originalName?.toLowerCase().includes(q);
+      const matchesTag = Array.isArray(doc.tags) && doc.tags.some((t) => t.toLowerCase().includes(q));
+      if (!matchesName && !matchesTag) return false;
+    }
+
+    // 4. Format filter
+    if (selectedFormat !== 'all') {
+      if (doc.extension?.toLowerCase() !== selectedFormat) return false;
+    }
+
+    return true;
   });
 
   const indexedDocuments = documents.filter((d) => d.indexingStatus === 'indexed');
@@ -251,57 +355,61 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
   ];
 
   const suggestedQueries = [
-    'What are the key findings and summaries?',
-    'Explain the system architecture and components',
-    'What were the financial and revenue highlights?',
-    'List all core metrics and dates mentioned',
+    'What are the main findings and conclusions?',
+    'Summarize key metrics and financial data',
+    'Explain the methodology and technical architecture',
   ];
 
-  const storageUsedMB = stats ? (stats.totalBytes / (1024 * 1024)).toFixed(1) : '0';
-  const storageMaxMB = stats?.maxMB || 100;
-  const storagePercent = stats ? Math.min(Math.round((stats.totalBytes / (storageMaxMB * 1024 * 1024)) * 100), 100) : 0;
+  const storageUsedMB = stats ? parseFloat(stats.totalMB || 0) : 0;
+  const storageMaxMB = stats ? stats.maxMB || 100 : 100;
+  const storagePercent = Math.min((storageUsedMB / storageMaxMB) * 100, 100);
+
+  const activeCollectionObj = collections.find((c) => c.id === selectedCollectionId);
 
   return (
     <>
+      {/* Screen Reader Live Region for Announcements */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </div>
+
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="doc-hub-title"
-        className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6 bg-black/80 backdrop-blur-md animate-fadeIn"
+        aria-label="Knowledge Base & Document Workspace"
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-fadeIn"
       >
-        <div
-          className="relative w-full max-w-5xl max-h-[92vh] flex flex-col rounded-3xl bg-neutral-900 border border-white/15 shadow-2xl shadow-black/90 overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between p-5 md:p-6 border-b border-white/10 bg-white/[0.02] gap-4">
+        <div className="w-full max-w-6xl h-[92vh] max-h-[900px] flex flex-col rounded-3xl bg-neutral-900 border border-white/10 shadow-2xl overflow-hidden text-neutral-100 animate-scaleUp">
+          {/* Header Bar */}
+          <div className="flex items-center justify-between px-5 md:px-6 py-4 border-b border-white/10 bg-white/[0.02]">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-2xl bg-gradient-to-tr from-cyan-500/20 via-blue-500/20 to-purple-500/20 text-cyan-400 border border-cyan-500/30 shrink-0">
-                <FileText className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-300 shadow-inner">
+                <FolderOpen className="w-5 h-5" />
               </div>
               <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 id="doc-hub-title" className="text-lg md:text-xl font-bold text-white tracking-tight">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base md:text-lg font-semibold text-white tracking-tight">
                     Document Workspace & Knowledge Base
                   </h2>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-                    Phase 3 Semantic Explorer
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                    Phase 5
                   </span>
                 </div>
-                <p className="text-xs text-white/50 mt-0.5">
-                  Vector retrieval with Gemini Embedding 2 & Interactive Passage Explorer
+                <p className="text-xs text-white/50 hidden sm:block">
+                  Organize collections, tag files, auto-index vectors, and explore your personal grounded knowledge.
                 </p>
               </div>
             </div>
 
-            {/* Storage Quota & Action Bar */}
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 sm:gap-3">
               {stats && (
-                <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-xs">
+                <div className="hidden lg:flex items-center gap-3 px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-xs">
                   <HardDrive className="w-4 h-4 text-cyan-400 shrink-0" />
                   <div>
                     <div className="flex items-center justify-between gap-3 text-[11px]">
-                      <span className="text-white/60">Storage: {storageUsedMB} / {storageMaxMB} MB</span>
+                      <span className="text-white/60">
+                        Storage: {storageUsedMB} / {storageMaxMB} MB
+                      </span>
                       <span className="text-white/40">{stats.count || 0}/{stats.maxCount || 50} files</span>
                     </div>
                     <div className="w-32 h-1.5 bg-white/10 rounded-full mt-1 overflow-hidden">
@@ -333,9 +441,9 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
 
               <button
                 type="button"
-                onClick={fetchDocumentsAndStats}
+                onClick={() => fetchDocumentsAndStats()}
                 disabled={isLoading}
-                aria-label="Refresh documents"
+                aria-label="Refresh documents and collections"
                 className="p-2.5 min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-white/60 hover:text-white hover:bg-white/10 border border-white/10 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500/80 focus-visible:outline-none"
                 title="Refresh documents"
               >
@@ -365,7 +473,7 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
               }`}
             >
               <FolderOpen className="w-4 h-4" />
-              <span>Files & Uploads</span>
+              <span>Files & Collections</span>
               <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/10 text-white/70">
                 {documents.length}
               </span>
@@ -389,116 +497,400 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
           </div>
 
           {/* Body Content */}
-          <div className="flex-1 overflow-y-auto p-5 md:p-6 space-y-6">
-            {/* Success message banner */}
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {/* Global Success Banner */}
             {successMessage && (
-              <div className="flex items-center gap-2 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs animate-fadeIn">
+              <div className="m-4 mb-0 flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs animate-fadeIn shrink-0">
                 <Layers className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>{successMessage}</span>
               </div>
             )}
 
-            {/* TAB 1: FILES & UPLOADS */}
+            {/* TAB 1: FILES & COLLECTIONS */}
             {activeTab === 'files' && (
-              <div className="space-y-6 animate-fadeIn">
-                {/* Upload Zone */}
-                <FileUploadZone
-                  onUploadSuccess={handleUploadSuccess}
-                  isUploading={isUploading}
-                  setIsUploading={setIsUploading}
-                />
+              <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+                {/* Desktop Collections Sidebar */}
+                <aside className="hidden md:flex w-64 shrink-0 flex-col border-r border-white/10 bg-white/[0.01] p-4 overflow-y-auto space-y-4">
+                  {/* Views */}
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCollectionId('all')}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                        selectedCollectionId === 'all'
+                          ? 'bg-cyan-500/15 text-cyan-300 font-semibold border border-cyan-500/30'
+                          : 'text-white/70 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <FolderOpen className="w-4 h-4 text-cyan-400" />
+                        <span>All Documents</span>
+                      </div>
+                      <span className="text-[10px] text-white/40 font-mono">{documents.length}</span>
+                    </button>
 
-                {/* Controls Bar: Filename Search & Format Filter */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-                  {/* Filename Search */}
-                  <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search documents by filename..."
-                      className="w-full pl-9 pr-4 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-cyan-400 transition-colors"
-                    />
-                    {searchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchQuery('')}
-                        aria-label="Clear filename search"
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCollectionId('uncategorized')}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                        selectedCollectionId === 'uncategorized'
+                          ? 'bg-cyan-500/15 text-cyan-300 font-semibold border border-cyan-500/30'
+                          : 'text-white/70 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Folder className="w-4 h-4 text-white/40" />
+                        <span>Uncategorized</span>
+                      </div>
+                      <span className="text-[10px] text-white/40 font-mono">{uncategorizedCount}</span>
+                    </button>
                   </div>
 
-                  {/* Format Filter Tabs */}
-                  <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/10 overflow-x-auto">
-                    {formats.map((fmt) => (
+                  <div className="border-t border-white/10 pt-3">
+                    {/* Collections Header */}
+                    <div className="flex items-center justify-between px-1 mb-2">
+                      <span className="text-[11px] font-semibold text-white/50 uppercase tracking-wider">
+                        Collections ({collections.length})
+                      </span>
                       <button
-                        key={fmt.id}
                         type="button"
-                        onClick={() => setSelectedFormat(fmt.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                          selectedFormat === fmt.id
-                            ? 'bg-cyan-500/20 text-cyan-300 font-semibold shadow-sm'
-                            : 'text-white/50 hover:text-white/80'
+                        onClick={() => {
+                          setEditingCollection(null);
+                          setIsCollectionModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] text-cyan-400 hover:text-cyan-300 font-medium cursor-pointer"
+                        title="Create new collection"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>New</span>
+                      </button>
+                    </div>
+
+                    {/* Collection List */}
+                    <div className="space-y-1">
+                      {collections.length === 0 ? (
+                        <div className="text-center py-6 px-2 text-white/40 text-xs">
+                          <p>No collections created.</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCollection(null);
+                              setIsCollectionModalOpen(true);
+                            }}
+                            className="mt-2 text-xs text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                          >
+                            + Create Collection
+                          </button>
+                        </div>
+                      ) : (
+                        collections.map((col) => {
+                          const isSelected = selectedCollectionId === col.id;
+                          return (
+                            <div
+                              key={col.id}
+                              className={`group flex items-center justify-between px-2.5 py-1.5 rounded-xl transition-all ${
+                                isSelected
+                                  ? 'bg-white/10 text-white font-semibold border border-white/15'
+                                  : 'hover:bg-white/5 text-white/70 hover:text-white'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setSelectedCollectionId(col.id)}
+                                className="flex-1 flex items-center gap-2 text-left truncate cursor-pointer py-0.5"
+                              >
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                                  style={{ backgroundColor: col.color || '#6366f1' }}
+                                />
+                                <span className="text-xs truncate">{col.name}</span>
+                              </button>
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                <span className="text-[10px] text-white/40 font-mono">
+                                  {col.documentCount || 0}
+                                </span>
+
+                                <div className="hidden group-hover:flex items-center gap-0.5 ml-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingCollection(col);
+                                      setIsCollectionModalOpen(true);
+                                    }}
+                                    className="p-1 text-white/40 hover:text-white rounded hover:bg-white/10 cursor-pointer"
+                                    title="Edit collection"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteCollectionTarget(col)}
+                                    className="p-1 text-white/40 hover:text-red-400 rounded hover:bg-white/10 cursor-pointer"
+                                    title="Delete collection"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </aside>
+
+                {/* Main Documents Workspace */}
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+                  {/* Mobile Collections Selector */}
+                  <div className="md:hidden space-y-2 pb-2 border-b border-white/10">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">
+                        Workspace Scope
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCollection(null);
+                          setIsCollectionModalOpen(true);
+                        }}
+                        className="text-xs text-cyan-400 font-medium flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> New Collection
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCollectionId('all')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-colors cursor-pointer ${
+                          selectedCollectionId === 'all'
+                            ? 'bg-cyan-500 text-neutral-950 font-bold'
+                            : 'bg-white/5 text-white/70 border border-white/10'
                         }`}
                       >
-                        {fmt.label}
+                        All ({documents.length})
                       </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Document Cards Grid */}
-                {isLoading && documents.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-white/40 gap-3">
-                    <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
-                    <p className="text-xs">Loading documents...</p>
-                  </div>
-                ) : error ? (
-                  <div className="flex items-center gap-2 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
-                    <AlertCircle className="w-5 h-5 shrink-0 text-red-400" />
-                    <span>{error}</span>
-                  </div>
-                ) : filteredDocuments.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.01]">
-                    <div className="p-4 rounded-2xl bg-white/5 text-white/30 mb-3">
-                      <FolderOpen className="w-8 h-8" />
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCollectionId('uncategorized')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-colors cursor-pointer ${
+                          selectedCollectionId === 'uncategorized'
+                            ? 'bg-cyan-500 text-neutral-950 font-bold'
+                            : 'bg-white/5 text-white/70 border border-white/10'
+                        }`}
+                      >
+                        Uncategorized ({uncategorizedCount})
+                      </button>
+                      {collections.map((col) => (
+                        <button
+                          key={col.id}
+                          type="button"
+                          onClick={() => setSelectedCollectionId(col.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-colors cursor-pointer ${
+                            selectedCollectionId === col.id
+                              ? 'bg-white/20 text-white font-bold border border-white/30'
+                              : 'bg-white/5 text-white/70 border border-white/10'
+                          }`}
+                        >
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: col.color || '#6366f1' }}
+                          />
+                          <span>{col.name}</span>
+                          <span className="text-[10px] opacity-70">({col.documentCount || 0})</span>
+                        </button>
+                      ))}
                     </div>
-                    <h4 className="text-sm font-medium text-white/70">
-                      {searchQuery || selectedFormat !== 'all'
-                        ? 'No documents match your filter'
-                        : 'No documents uploaded yet'}
-                    </h4>
-                    <p className="text-xs text-white/40 max-w-sm mt-1">
-                      {searchQuery || selectedFormat !== 'all'
-                        ? 'Try clearing your search query or selecting "All Files".'
-                        : 'Upload a PDF, DOCX, TXT, or CSV file above to start auto-indexing and querying with Gemini RAG.'}
-                    </p>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredDocuments.map((doc) => (
-                      <DocumentCard
-                        key={doc.id}
-                        document={doc}
-                        onPreview={(d) => setPreviewDoc(d)}
-                        onAnalyze={(d) => setAnalyzeDoc(d)}
-                        onDelete={(d) => setDeleteDoc(d)}
-                        onIndex={handleIndexDocument}
-                        isIndexing={indexingDocIds.has(doc.id)}
+
+                  {/* Active Workspace Banner / Collection Details */}
+                  {activeCollectionObj && (
+                    <div
+                      className="flex items-center justify-between p-3 px-4 rounded-2xl border bg-white/[0.02]"
+                      style={{
+                        borderColor: `${activeCollectionObj.color}40`,
+                        backgroundColor: `${activeCollectionObj.color}08`,
+                      }}
+                    >
+                      <div className="flex items-center gap-2.5 truncate">
+                        <span
+                          className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
+                          style={{ backgroundColor: activeCollectionObj.color }}
+                        />
+                        <div className="truncate">
+                          <h4 className="text-xs font-semibold text-white truncate">
+                            Collection: {activeCollectionObj.name}
+                          </h4>
+                          {activeCollectionObj.description && (
+                            <p className="text-[11px] text-white/50 truncate">
+                              {activeCollectionObj.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingCollection(activeCollectionObj);
+                            setIsCollectionModalOpen(true);
+                          }}
+                          className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                          title="Edit collection"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteCollectionTarget(activeCollectionObj)}
+                          className="p-1.5 rounded-lg text-white/60 hover:text-red-400 hover:bg-white/10 transition-colors cursor-pointer"
+                          title="Delete collection"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Active Tag Filter Indicator */}
+                  {selectedTag && (
+                    <div className="flex items-center justify-between p-2.5 px-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-xs text-cyan-300 animate-fadeIn">
+                      <div className="flex items-center gap-2">
+                        <Tag className="w-3.5 h-3.5" />
+                        <span>
+                          Filtered by Tag: <strong>#{selectedTag}</strong>
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTag(null)}
+                        className="text-[11px] text-cyan-200 hover:text-white underline cursor-pointer"
+                      >
+                        Clear tag filter
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Upload Drop Zone */}
+                  <FileUploadZone
+                    onUploadSuccess={handleUploadSuccess}
+                    isUploading={isUploading}
+                    setIsUploading={setIsUploading}
+                  />
+
+                  {/* Filter & Search Toolbar */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+                    {/* Filename & Tag Search */}
+                    <div className="relative flex-1 max-w-md">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search by filename or #tag..."
+                        className="w-full pl-9 pr-4 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-cyan-400 transition-colors"
                       />
-                    ))}
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery('')}
+                          aria-label="Clear search"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Format Filter Tabs */}
+                    <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/10 overflow-x-auto">
+                      {formats.map((fmt) => (
+                        <button
+                          key={fmt.id}
+                          type="button"
+                          onClick={() => setSelectedFormat(fmt.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                            selectedFormat === fmt.id
+                              ? 'bg-cyan-500/20 text-cyan-300 font-semibold shadow-sm'
+                              : 'text-white/50 hover:text-white/80'
+                          }`}
+                        >
+                          {fmt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                )}
+
+                  {/* Document Cards Grid */}
+                  {isLoading && documents.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-white/40 gap-3">
+                      <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+                      <p className="text-xs">Loading documents...</p>
+                    </div>
+                  ) : error ? (
+                    <div className="flex items-center gap-2 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
+                      <AlertCircle className="w-5 h-5 shrink-0 text-red-400" />
+                      <span>{error}</span>
+                    </div>
+                  ) : filteredDocuments.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.01]">
+                      <div className="p-4 rounded-2xl bg-white/5 text-white/30 mb-3">
+                        <FolderOpen className="w-8 h-8" />
+                      </div>
+                      <h4 className="text-sm font-medium text-white/70">
+                        {searchQuery || selectedFormat !== 'all' || selectedCollectionId !== 'all' || selectedTag
+                          ? 'No documents match your active filters'
+                          : 'No documents uploaded yet'}
+                      </h4>
+                      <p className="text-xs text-white/40 max-w-sm mt-1">
+                        {searchQuery || selectedFormat !== 'all' || selectedCollectionId !== 'all' || selectedTag ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedCollectionId('all');
+                              setSelectedTag(null);
+                              setSearchQuery('');
+                              setSelectedFormat('all');
+                            }}
+                            className="text-cyan-400 hover:text-cyan-300 underline font-medium cursor-pointer"
+                          >
+                            Reset all filters
+                          </button>
+                        ) : (
+                          'Upload a PDF, DOCX, TXT, or CSV file above to start organizing and querying with Gemini RAG.'
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                      {filteredDocuments.map((doc) => (
+                        <DocumentCard
+                          key={doc.id}
+                          document={doc}
+                          collections={collections}
+                          onPreview={(d) => setPreviewDoc(d)}
+                          onAnalyze={(d) => setAnalyzeDoc(d)}
+                          onDelete={(d) => setDeleteDoc(d)}
+                          onIndex={handleIndexDocument}
+                          isIndexing={indexingDocIds.has(doc.id)}
+                          onFilterByCollection={(colId) => setSelectedCollectionId(colId)}
+                          onFilterByTag={(tag) => setSelectedTag(tag)}
+                          onAssignCollection={handleAssignCollection}
+                          onUpdateTags={handleUpdateTags}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
             {/* TAB 2: SEMANTIC SEARCH & PASSAGE EXPLORER (Phase 3) */}
             {activeTab === 'search' && (
-              <div className="space-y-6 animate-fadeIn">
+              <div className="flex-1 overflow-y-auto p-5 md:p-6 space-y-6 animate-fadeIn">
                 {/* Search Header Bar */}
                 <div className="flex flex-col gap-3 p-4 md:p-5 rounded-2xl bg-white/[0.02] border border-white/10 shadow-inner">
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -525,7 +917,7 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
                           aria-label="Clear semantic search"
                           className="absolute right-14 top-1/2 -translate-y-1/2 text-white/40 hover:text-white cursor-pointer"
                         >
-                          <X className="w-4 h-4" />
+                          <X className="w-3.5 h-3.5" />
                         </button>
                       )}
                       <button
@@ -652,9 +1044,7 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
                       <span className="font-medium text-cyan-300">
                         Found {searchResults.length} matching passage{searchResults.length === 1 ? '' : 's'}
                       </span>
-                      <span>
-                        Sorted by similarity relevance
-                      </span>
+                      <span>Sorted by similarity relevance</span>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -713,6 +1103,27 @@ export default function DocumentHubModal({ isOpen, onClose, user, onAskFaisi }) 
           isOpen={Boolean(deleteDoc)}
           onClose={() => setDeleteDoc(null)}
           onDeleted={handleDocumentDeleted}
+        />
+      )}
+
+      {isCollectionModalOpen && (
+        <CollectionModal
+          isOpen={isCollectionModalOpen}
+          onClose={() => {
+            setIsCollectionModalOpen(false);
+            setEditingCollection(null);
+          }}
+          collection={editingCollection}
+          onSuccess={handleCollectionSuccess}
+        />
+      )}
+
+      {deleteCollectionTarget && (
+        <CollectionDeleteModal
+          isOpen={Boolean(deleteCollectionTarget)}
+          onClose={() => setDeleteCollectionTarget(null)}
+          collection={deleteCollectionTarget}
+          onSuccess={handleCollectionDeleted}
         />
       )}
     </>

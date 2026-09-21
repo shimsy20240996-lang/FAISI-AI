@@ -20,6 +20,7 @@ import {
   apiClaimConversations,
   apiGetUnclaimedCount,
   apiGetDocuments,
+  apiGetCollections,
 } from './services/api';
 
 const LOCAL_STORAGE_KEY_FAISI = 'faisi_local_conversations';
@@ -98,10 +99,12 @@ function App() {
   // Document Hub modal state (Phase 6)
   const [isDocumentHubOpen, setIsDocumentHubOpen] = useState(false);
 
-  // Knowledge Base RAG state & Document Selection (Phase 7 & Phase 10.10)
+  // Knowledge Base RAG state & Document/Collection Selection (Phase 5, 7 & Phase 10.10)
   const [useKnowledgeBase, setUseKnowledgeBase] = useState(false);
   const [userDocuments, setUserDocuments] = useState([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
+  const [collections, setCollections] = useState([]);
+  const [selectedCollectionId, setSelectedCollectionId] = useState(null);
   const [composerPrefill, setComposerPrefill] = useState('');
 
   const activeAbortControllerRef = useRef(null);
@@ -122,11 +125,26 @@ function App() {
     }
   }, [isAuthenticated]);
 
+  // Fetch / refresh user collections for the document selector
+  const refreshCollections = useCallback(async () => {
+    if (!isAuthenticated) {
+      setCollections([]);
+      return;
+    }
+    try {
+      const res = await apiGetCollections();
+      setCollections(res.collections || []);
+    } catch (err) {
+      console.warn('⚠️ Could not load collections for selector:', err.message);
+    }
+  }, [isAuthenticated]);
+
   useEffect(() => {
     if (isAuthenticated && useKnowledgeBase) {
       refreshUserDocuments();
+      refreshCollections();
     }
-  }, [isAuthenticated, useKnowledgeBase, refreshUserDocuments]);
+  }, [isAuthenticated, useKnowledgeBase, refreshUserDocuments, refreshCollections]);
 
   const handleSelectDocument = useCallback((docId) => {
     setSelectedDocumentIds((prev) => {
@@ -148,6 +166,14 @@ function App() {
     setSelectedDocumentIds([]);
   }, []);
 
+  const handleSelectCollection = useCallback((colId) => {
+    setSelectedCollectionId((prev) => (prev === colId ? null : colId));
+  }, []);
+
+  const handleClearCollection = useCallback(() => {
+    setSelectedCollectionId(null);
+  }, []);
+
   // Document Hub opener & closer
   const handleOpenDocuments = useCallback(() => {
     setIsDocumentHubOpen(true);
@@ -157,8 +183,9 @@ function App() {
     setIsDocumentHubOpen(false);
     if (isAuthenticated && useKnowledgeBase) {
       refreshUserDocuments();
+      refreshCollections();
     }
-  }, [isAuthenticated, useKnowledgeBase, refreshUserDocuments]);
+  }, [isAuthenticated, useKnowledgeBase, refreshUserDocuments, refreshCollections]);
 
   // Load conversations whenever authentication state changes
   useEffect(() => {
@@ -281,6 +308,7 @@ function App() {
       handleStopGeneration();
     }
     setSelectedDocumentIds([]);
+    setSelectedCollectionId(null);
 
     if (isAuthenticated) {
       try {
@@ -564,6 +592,10 @@ function App() {
           conversationId: isAuthenticated && activeId && !activeId.startsWith('conv-') ? activeId : undefined,
           isRegenerate: false,
           useKnowledgeBase: useKnowledgeBase && isAuthenticated,
+          collectionId:
+            useKnowledgeBase && isAuthenticated && selectedCollectionId
+              ? selectedCollectionId
+              : undefined,
           selectedDocIds:
             useKnowledgeBase && isAuthenticated && selectedDocumentIds.length > 0
               ? selectedDocumentIds
@@ -717,6 +749,10 @@ function App() {
           conversationId: isAuthenticated && activeId && !activeId.startsWith('conv-') ? activeId : undefined,
           isRegenerate: true,
           useKnowledgeBase: useKnowledgeBase && isAuthenticated,
+          collectionId:
+            useKnowledgeBase && isAuthenticated && selectedCollectionId
+              ? selectedCollectionId
+              : undefined,
           selectedDocIds:
             useKnowledgeBase && isAuthenticated && selectedDocumentIds.length > 0
               ? selectedDocumentIds
@@ -861,6 +897,7 @@ function App() {
         const next = !prev;
         if (!next) {
           setSelectedDocumentIds([]);
+          setSelectedCollectionId(null);
         }
         return next;
       });
@@ -926,6 +963,11 @@ function App() {
           onSelectAllDocuments={handleSelectAllDocuments}
           onClearDocumentSelection={handleClearDocumentSelection}
           onRefreshDocuments={refreshUserDocuments}
+          collections={collections}
+          selectedCollectionId={selectedCollectionId}
+          onSelectCollection={handleSelectCollection}
+          onClearCollection={handleClearCollection}
+          onRefreshCollections={refreshCollections}
           onNotice={handleNotice}
           composerPrefill={composerPrefill}
           onClearComposerPrefill={() => setComposerPrefill('')}

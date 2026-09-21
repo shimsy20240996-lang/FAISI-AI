@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { ragService } from '../services/rag/ragService.js';
 import { retrievalService } from '../services/rag/retrievalService.js';
 import { Document } from '../models/Document.js';
+import { Collection } from '../models/Collection.js';
 
 export class RagController {
   /**
@@ -79,7 +80,7 @@ export class RagController {
    */
   async searchKnowledgeBase(req, res, next) {
     try {
-      const { query, selectedDocIds, topK } = req.body;
+      const { query, collectionId, selectedDocIds, topK } = req.body;
 
       if (!query || typeof query !== 'string' || query.trim().length === 0) {
         return res.status(400).json({
@@ -91,9 +92,31 @@ export class RagController {
         });
       }
 
-      // Validate selectedDocIds ownership
+      // Validate collection / selectedDocIds ownership
       let verifiedDocIds = [];
       let hadExplicitSelection = false;
+
+      // Handle collectionId scoping if provided
+      let collectionDocIds = null;
+      if (collectionId !== undefined && collectionId !== null && collectionId !== '') {
+        hadExplicitSelection = true;
+        if (typeof collectionId === 'string' && mongoose.Types.ObjectId.isValid(collectionId)) {
+          const ownedCol = await Collection.findOne({ _id: collectionId, userId: req.user.id }).select('_id');
+          if (ownedCol) {
+            const memberDocs = await Document.find({
+              userId: req.user.id,
+              collectionId: ownedCol._id,
+              indexingStatus: 'indexed',
+            }).select('_id');
+            collectionDocIds = memberDocs.map((d) => d._id.toString());
+          } else {
+            // Foreign or non-existent collection -> immediate zero evidence
+            collectionDocIds = [];
+          }
+        } else {
+          collectionDocIds = [];
+        }
+      }
 
       if (Array.isArray(selectedDocIds) && selectedDocIds.length > 0) {
         hadExplicitSelection = true;
@@ -111,6 +134,15 @@ export class RagController {
             userId: req.user.id,
           }).select('_id');
           verifiedDocIds = ownedDocs.map((d) => d._id.toString());
+        }
+      }
+
+      // If collection scope was specified, apply intersection or collection members
+      if (collectionDocIds !== null) {
+        if (Array.isArray(selectedDocIds) && selectedDocIds.length > 0) {
+          verifiedDocIds = verifiedDocIds.filter((id) => collectionDocIds.includes(id));
+        } else {
+          verifiedDocIds = collectionDocIds;
         }
       }
 

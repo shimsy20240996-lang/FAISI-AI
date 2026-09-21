@@ -22,11 +22,13 @@ export class DocumentController {
       }
 
       const autoIndex = req.body?.autoIndex !== false && req.body?.autoIndex !== 'false';
+      const collectionId = req.body?.collectionId || null;
 
       const result = await documentService.processUpload({
         userId: req.user.id,
         file: req.file,
         autoIndex,
+        collectionId,
       });
 
       recordDocumentUpload({ status: 'accepted' });
@@ -81,13 +83,18 @@ export class DocumentController {
   }
 
   /**
-   * List authenticated user's documents
+   * List authenticated user's documents with optional collection and tag filtering
    * GET /api/documents
    */
   async getDocuments(req, res, next) {
     try {
-      const { limit, skip } = req.query;
-      const data = await documentService.getUserDocuments(req.user.id, { limit, skip });
+      const { limit, skip, collectionId, tag } = req.query;
+      const data = await documentService.getUserDocuments(req.user.id, {
+        limit,
+        skip,
+        collectionId,
+        tag,
+      });
 
       return res.status(200).json({
         success: true,
@@ -359,6 +366,84 @@ export class DocumentController {
         error: {
           code: 'DELETE_FAILED',
           message: 'Failed to delete document.',
+        },
+      });
+    }
+  }
+
+  /**
+   * Update document collection assignment
+   * PATCH /api/documents/:id/collection
+   */
+  async updateDocumentCollection(req, res, next) {
+    try {
+      const { collectionId } = req.body || {};
+      const doc = await documentService.updateDocumentCollection(
+        req.user.id,
+        req.params.id,
+        collectionId
+      );
+
+      if (!doc) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'DOCUMENT_NOT_FOUND',
+            message: 'Document not found.',
+          },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        document: doc.toJSON(),
+      });
+    } catch (err) {
+      const statusCode = err.statusCode || 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: {
+          code: err.code || (statusCode === 400 ? 'INVALID_COLLECTION_ASSIGNMENT' : 'UPDATE_COLLECTION_FAILED'),
+          message: err.message || 'Failed to update document collection.',
+        },
+      });
+    }
+  }
+
+  /**
+   * Update document tags
+   * PATCH /api/documents/:id/tags
+   */
+  async updateDocumentTags(req, res, next) {
+    try {
+      const { tags } = req.body || {};
+      const doc = await documentService.updateDocumentTags(
+        req.user.id,
+        req.params.id,
+        tags
+      );
+
+      if (!doc) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'DOCUMENT_NOT_FOUND',
+            message: 'Document not found.',
+          },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        document: doc.toJSON(),
+      });
+    } catch (err) {
+      const statusCode = err.statusCode || 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: {
+          code: err.code || (statusCode === 400 ? 'INVALID_TAGS' : 'UPDATE_TAGS_FAILED'),
+          message: err.message || 'Failed to update document tags.',
         },
       });
     }

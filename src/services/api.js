@@ -403,11 +403,15 @@ export async function checkBackendHealth() {
 /**
  * Uploads a document (PDF, DOCX, TXT, CSV) to the secure server.
  * @param {File} file
+ * @param {string} [collectionId]
  * @returns {Promise<{ success: boolean, document: any, isDuplicate: boolean, message: string }>}
  */
-export async function apiUploadDocument(file) {
+export async function apiUploadDocument(file, collectionId = null) {
   const formData = new FormData();
   formData.append('file', file);
+  if (collectionId) {
+    formData.append('collectionId', collectionId);
+  }
 
   const response = await fetch('/api/documents', {
     method: 'POST',
@@ -427,13 +431,22 @@ export async function apiUploadDocument(file) {
 }
 
 /**
- * Retrieves list of documents owned by the authenticated user.
+ * Retrieves list of documents owned by the authenticated user with optional collection and tag filtering.
  * @param {number} [limit=50]
  * @param {number} [skip=0]
+ * @param {{ collectionId?: string, tag?: string }} [options]
  * @returns {Promise<{ documents: Array<any>, total: number }>}
  */
-export async function apiGetDocuments(limit = 50, skip = 0) {
-  const response = await fetch(`/api/documents?limit=${limit}&skip=${skip}`, {
+export async function apiGetDocuments(limit = 50, skip = 0, { collectionId, tag } = {}) {
+  let url = `/api/documents?limit=${limit}&skip=${skip}`;
+  if (collectionId) {
+    url += `&collectionId=${encodeURIComponent(collectionId)}`;
+  }
+  if (tag) {
+    url += `&tag=${encodeURIComponent(tag)}`;
+  }
+
+  const response = await fetch(url, {
     headers: getHeaders(),
     credentials: 'include',
   });
@@ -591,6 +604,160 @@ export async function apiGetDocumentStats() {
   return data.stats || null;
 }
 
+/**
+ * Updates document collection assignment (move or remove to uncategorized).
+ * @param {string} documentId
+ * @param {string|null} collectionId
+ * @returns {Promise<any>}
+ */
+export async function apiUpdateDocumentCollection(documentId, collectionId) {
+  const response = await fetch(`/api/documents/${documentId}/collection`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    credentials: 'include',
+    body: JSON.stringify({ collectionId }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || 'Failed to update document collection');
+  }
+
+  return data.document;
+}
+
+/**
+ * Updates document tags.
+ * @param {string} documentId
+ * @param {string[]} tags
+ * @returns {Promise<any>}
+ */
+export async function apiUpdateDocumentTags(documentId, tags) {
+  const response = await fetch(`/api/documents/${documentId}/tags`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    credentials: 'include',
+    body: JSON.stringify({ tags }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || 'Failed to update document tags');
+  }
+
+  return data.document;
+}
+
+/* ==========================================================================
+   COLLECTIONS & WORKSPACE ORGANIZATION API (Phase 5)
+   ========================================================================== */
+
+/**
+ * Retrieves all user collections with live document counts.
+ * @returns {Promise<{ collections: Array<any>, uncategorizedCount: number, total: number }>}
+ */
+export async function apiGetCollections() {
+  const response = await fetch('/api/collections', {
+    headers: getHeaders(),
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.error?.message || 'Failed to fetch collections');
+  }
+
+  const data = await response.json();
+  return {
+    collections: data.collections || [],
+    uncategorizedCount: data.uncategorizedCount || 0,
+    total: data.total || 0,
+  };
+}
+
+/**
+ * Creates a new user collection.
+ * @param {{ name: string, description?: string, color?: string }} data
+ * @returns {Promise<any>}
+ */
+export async function apiCreateCollection({ name, description, color }) {
+  const response = await fetch('/api/collections', {
+    method: 'POST',
+    headers: getHeaders(),
+    credentials: 'include',
+    body: JSON.stringify({ name, description, color }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || 'Failed to create collection');
+  }
+
+  return data.collection;
+}
+
+/**
+ * Retrieves a single collection by ID.
+ * @param {string} id
+ * @returns {Promise<any>}
+ */
+export async function apiGetCollection(id) {
+  const response = await fetch(`/api/collections/${id}`, {
+    headers: getHeaders(),
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.error?.message || 'Failed to fetch collection');
+  }
+
+  const data = await response.json();
+  return data.collection;
+}
+
+/**
+ * Updates an existing collection.
+ * @param {string} id
+ * @param {{ name?: string, description?: string, color?: string }} data
+ * @returns {Promise<any>}
+ */
+export async function apiUpdateCollection(id, { name, description, color }) {
+  const response = await fetch(`/api/collections/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    credentials: 'include',
+    body: JSON.stringify({ name, description, color }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || 'Failed to update collection');
+  }
+
+  return data.collection;
+}
+
+/**
+ * Deletes a collection safely (uncouples member documents to Uncategorized).
+ * @param {string} id
+ * @returns {Promise<{ success: boolean, message: string, uncoupledCount: number }>}
+ */
+export async function apiDeleteCollection(id) {
+  const response = await fetch(`/api/collections/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+    credentials: 'include',
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || 'Failed to delete collection');
+  }
+
+  return data;
+}
+
 /* ==========================================================================
    KNOWLEDGE BASE & RAG API (Phase 7)
    ========================================================================== */
@@ -639,14 +806,20 @@ export async function apiIndexAllDocuments() {
  * @param {string} query
  * @param {string[]} [selectedDocIds]
  * @param {number} [topK]
+ * @param {string|null} [collectionId]
  * @returns {Promise<{ success: boolean, hasEvidence: boolean, sources: Array<any>, resultCount: number }>}
  */
-export async function apiSearchKnowledgeBase(query, selectedDocIds = [], topK = 5) {
+export async function apiSearchKnowledgeBase(query, selectedDocIds = [], topK = 5, collectionId = null) {
+  const payload = { query, selectedDocIds, topK };
+  if (collectionId) {
+    payload.collectionId = collectionId;
+  }
+
   const response = await fetch('/api/rag/search', {
     method: 'POST',
     headers: getHeaders(),
     credentials: 'include',
-    body: JSON.stringify({ query, selectedDocIds, topK }),
+    body: JSON.stringify(payload),
   });
 
   const data = await response.json().catch(() => ({}));

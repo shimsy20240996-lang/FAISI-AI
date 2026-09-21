@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { Document } from '../../models/Document.js';
 import { DocumentChunk } from '../../models/DocumentChunk.js';
+import { Collection } from '../../models/Collection.js';
 import { User } from '../../models/User.js';
 import { storageService } from '../storage/storageService.js';
 import { validateUploadedFile } from './fileValidationService.js';
@@ -10,6 +11,63 @@ import { ragService } from '../rag/ragService.js';
 import { aiService } from '../ai/aiService.js';
 import { ENV } from '../../config/env.js';
 import { recordDocumentProcessing } from '../../utils/metrics.js';
+
+const TAG_REGEX = /^[a-z0-9_-]+$/;
+
+/**
+ * Normalizes, validates, and deduplicates an array of document tags.
+ * Rejects invalid tags, excessive tags, or bad characters with 400 errors.
+ * @param {Array<string>} tags
+ * @returns {Array<string>}
+ */
+export function normalizeTags(tags) {
+  if (!Array.isArray(tags)) {
+    const err = new Error('Tags must be an array of strings.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (tags.length > 10) {
+    const err = new Error('A document can have a maximum of 10 tags.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const normalizedSet = new Set();
+
+  for (const rawTag of tags) {
+    if (typeof rawTag !== 'string') {
+      const err = new Error('Each tag must be a string.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const trimmed = rawTag.trim().toLowerCase();
+    if (!trimmed) {
+      const err = new Error('Tags cannot be empty strings.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (trimmed.length > 30) {
+      const err = new Error(`Tag "${trimmed}" exceeds maximum allowed length of 30 characters.`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (!TAG_REGEX.test(trimmed)) {
+      const err = new Error(
+        `Tag "${trimmed}" contains invalid characters. Only lowercase alphanumeric characters, hyphens, and underscores are permitted.`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    normalizedSet.add(trimmed);
+  }
+
+  return Array.from(normalizedSet);
+}
 
 export class DocumentService {
   /**
@@ -177,12 +235,21 @@ export class DocumentService {
    * Uploads, validates, stores, and extracts a document for the user with atomic quota reservation & rollback,
    * and automatically initiates asynchronous background indexing for Knowledge Base readiness.
    */
-  async processUpload({ userId, file, autoIndex = true }) {
+  async processUpload({ userId, file, autoIndex = true, collectionId = null }) {
     if (!file || !file.buffer) {
       throw new Error('No document file was provided in the request');
     }
 
     const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+    // Optional collection assignment verification
+    let verifiedCollectionId = null;
+    if (collectionId && mongoose.Types.ObjectId.isValid(collectionId)) {
+      const col = await Collection.findOne({ _id: collectionId, userId: userObjectId });
+      if (col) {
+        verifiedCollectionId = col._id;
+      }
+    }
 
     // Step 1: Multi-layer file validation & checksum
     const validated = validateUploadedFile(file, userObjectId.toString());
@@ -219,6 +286,7 @@ export class DocumentService {
     try {
       doc = await Document.create({
         userId: userObjectId,
+        collectionId: verifiedCollectionId,
         originalName: validated.originalName,
         safeName: validated.safeName,
         mimeType: validated.mimeType,
@@ -307,22 +375,99 @@ export class DocumentService {
   }
 
   /**
-   * List user's documents with pagination and total stats
+   * List user's documents with pagination, collection filtering, tag filtering, and total stats
    */
-  async getUserDocuments(userId, { limit = 50, skip = 0 } = {}) {
+  async getUserDocuments(userId, { limit = 50, skip = 0, collectionId, tag } = {}) {
     const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
     const boundedLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100);
     const boundedSkip = Math.max(parseInt(skip, 10) || 0, 0);
 
+    const filter = { userId: userObjectId };
+
+    if (collectionId === 'uncategorized') {
+      filter.collectionId = null;
+    } else if (collectionId && mongoose.Types.ObjectId.isValid(collectionId)) {
+      filter.collectionId = new mongoose.Types.ObjectId(collectionId);
+    }
+
+    if (tag && typeof tag === 'string' && tag.trim()) {
+      filter.tags = tag.trim().toLowerCase();
+    }
+
     const [documents, total] = await Promise.all([
-      Document.find({ userId: userObjectId })
+      Document.find(filter)
         .sort({ createdAt: -1 })
         .skip(boundedSkip)
         .limit(boundedLimit),
-      Document.countDocuments({ userId: userObjectId }),
+      Document.countDocuments(filter),
     ]);
 
     return { documents, total, limit: boundedLimit, skip: boundedSkip };
+  }
+
+  /**
+   * Updates document collection assignment (Move/Remove to Uncategorized).
+   * @param {string|mongoose.Types.ObjectId} userId
+   * @param {string} documentId
+   * @param {string|null} collectionId
+   * @returns {Promise<any|null>}
+   */
+  async updateDocumentCollection(userId, documentId, collectionId) {
+    if (!documentId || !mongoose.Types.ObjectId.isValid(documentId)) {
+      const err = new Error('Invalid document ID.');
+      err.statusCode = 400;
+      throw err;
+    }
+    const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+    let targetColId = null;
+    if (collectionId !== null && collectionId !== undefined && collectionId !== '') {
+      if (!mongoose.Types.ObjectId.isValid(collectionId)) {
+        const err = new Error('Invalid collection ID.');
+        err.statusCode = 400;
+        throw err;
+      }
+      const col = await Collection.findOne({ _id: collectionId, userId: userObjectId });
+      if (!col) {
+        const err = new Error('Collection not found.');
+        err.statusCode = 404;
+        throw err;
+      }
+      targetColId = col._id;
+    }
+
+    const doc = await Document.findOneAndUpdate(
+      { _id: documentId, userId: userObjectId },
+      { $set: { collectionId: targetColId } },
+      { new: true }
+    );
+
+    return doc;
+  }
+
+  /**
+   * Updates document tags with strict normalization and validation.
+   * @param {string|mongoose.Types.ObjectId} userId
+   * @param {string} documentId
+   * @param {Array<string>} rawTags
+   * @returns {Promise<any|null>}
+   */
+  async updateDocumentTags(userId, documentId, rawTags) {
+    if (!documentId || !mongoose.Types.ObjectId.isValid(documentId)) {
+      const err = new Error('Invalid document ID.');
+      err.statusCode = 400;
+      throw err;
+    }
+    const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+    const normalizedTags = normalizeTags(rawTags);
+
+    const doc = await Document.findOneAndUpdate(
+      { _id: documentId, userId: userObjectId },
+      { $set: { tags: normalizedTags } },
+      { new: true }
+    );
+
+    return doc;
   }
 
   /**

@@ -128,6 +128,16 @@ router.post('/index-all', indexingRateLimiter, validateRequestOrigin, (req, res,
   ragController.indexAllDocuments(req, res, next);
 });
 
+// Update document collection
+router.patch('/:id/collection', validateRequestOrigin, (req, res, next) => {
+  documentController.updateDocumentCollection(req, res, next);
+});
+
+// Update document tags
+router.patch('/:id/tags', validateRequestOrigin, (req, res, next) => {
+  documentController.updateDocumentTags(req, res, next);
+});
+
 // Delete document
 router.delete('/:id', validateRequestOrigin, (req, res, next) => {
   documentController.deleteDocument(req, res, next);
